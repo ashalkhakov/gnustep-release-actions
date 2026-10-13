@@ -57,6 +57,12 @@ jobs:
       - name: Version
         run: '"$GITHUB_WORKSPACE/.release-actions/scripts/version.sh"'
 
+      # The version into every Xcode project, .xcconfig, Info.plist and app
+      # GNUmakefile the repository has, before its build: the same way for
+      # every app, so no app stamps its own.
+      - name: Stamp the version
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/stamp-version.sh"'
+
       - name: Build
         run: |
           mkdir -p "$RELEASE_DIR/iphoneos" "$RELEASE_DIR/iphonesimulator"

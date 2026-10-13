@@ -16,6 +16,7 @@ here reaches every repository when it moves to the new version.
 | [`appimage-test`](appimage-test/action.yml) | Runs the repository's `linux-test.sh` against an AppImage on a clean Ubuntu (no GNUstep, no fonts), in a container |
 | [`appimage-tools`](appimage-tools/action.yml) | linuxdeploy (pinned) and the AppImage runtime |
 | [`gnustep-stack`](gnustep-stack/action.yml) | The patched GNUstep stack (gnustep-patches' `build-gnustep.sh`), cached by its recipe |
+| [`stamp-version`](stamp-version/action.yml) | Writes a version into every Xcode project, `.xcconfig`, Info.plist and app GNUmakefile the repository has, by key; the release workflows do it themselves |
 | [`pins`](pins/action.yml) | Loads the repository's pins (`.github/pins.env`) into the job's environment |
 
 Each says what it takes and what it gives in its `action.yml`.
@@ -69,7 +70,9 @@ the repository's root:
 | `.github/release/ios-build.sh` | Builds the iOS app(s) into `$RELEASE_DIR/iphoneos` and `$RELEASE_DIR/iphonesimulator` (`ios-release.yml`) |
 | `.github/release/ios-test.sh <app>` | Tests a simulator build (optional) |
 
-They see `TAG`, `APP_VERSION` (`1.2.3`, or `0.0.0-build<n>` without a tag),
+The workflows stamp the version before the build hooks run
+([`scripts/stamp-version.sh`](scripts/stamp-version.sh)), so a hook passes
+no version to its build and a repository keeps no stamping script. They see `TAG`, `APP_VERSION` (`1.2.3`, or `0.0.0-build<n>` without a tag),
 `BUILD_NUMBER` (the run's; CFBundleVersion, which Sparkle compares) and the
 repository's pins. The workflows do the rest the same way for everyone:
 checkout, pins and dependencies, a universal binary and Sparkle checked,

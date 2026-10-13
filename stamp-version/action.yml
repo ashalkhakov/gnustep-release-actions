@@ -1,0 +1,29 @@
+name: Stamp the version
+description: >
+  Writes a version into everything in the repository that carries one
+  (scripts/stamp-version.sh): MARKETING_VERSION and CURRENT_PROJECT_VERSION in
+  Xcode projects and .xcconfig files, the version keys an Info.plist has,
+  ApplicationRelease and FullVersionID in GNUstep's, VERSION in an app's
+  GNUmakefile. The release workflows do this themselves; this is for a CI
+  build, so that what it makes says what it is.
+inputs:
+  version:
+    description: The version (v0.4.3, 0.0.0-57-abc1234); its leading number is what Apple's keys get
+    required: true
+  build:
+    description: The build number, CFBundleVersion (default the run number)
+    required: false
+    default: ''
+  working-directory:
+    description: The repository's root
+    required: false
+    default: .
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        VERSION: ${{ inputs.version }}
+        BUILD: ${{ inputs.build }}
+      run: '"$GITHUB_ACTION_PATH/../scripts/stamp-version.sh" "$VERSION" "${BUILD:-$GITHUB_RUN_NUMBER}"'
