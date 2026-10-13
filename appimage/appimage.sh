@@ -8,9 +8,10 @@
 #
 #   appimage.sh .github/release/appimage.conf
 #
-# Run from the repository's root, after its build has installed its apps and
-# tools into the prefix (GNUSTEP_INSTALLATION_DOMAIN=SYSTEM). The environment:
-#   PREFIX             the GNUstep prefix (gnustep-stack sets it)
+# Run from the repository's root, after `make install` has put its apps and
+# tools into the prefix (the Linux workflow installs into a staging directory
+# and copies it there). The environment:
+#   PREFIX             the GNUstep prefix, /opt/gnustep
 #   APP_VERSION        in the image's name (default: dev)
 #   LINUXDEPLOY, LDAI_RUNTIME_FILE      as appimage-tools sets them
 #   LDAI_UPDATE_INFORMATION             for a release (appimage-update-info):
@@ -35,6 +36,11 @@
 #                      (plug-ins, stores): their libraries are bundled too
 #   REQUIRE            paths that must be in the image, as the end of a path
 #                      under it (SimpleNotes.app/Resources/MainMenu.xib)
+#   SMOKE              the image's smoke test (appimage-test, on a clean
+#                      Ubuntu): the arguments to start it with, under Xvfb
+#                      (--self-test builtin); it must exit 0
+#   SMOKE_SCRIPT       or a script of the repository's, given the image's path,
+#                      for a test that needs more (a server started first)
 set -euo pipefail
 
 conf=${1:?usage: appimage.sh <appimage.conf>}

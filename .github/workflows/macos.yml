@@ -1,22 +1,25 @@
-# A Mac app's build, the same for every repository, on every push and pull
-# request and for a release: built by the repository's hook, tested, zipped
-# and uploaded; and for a tag, signed and tested again, notarized, its Sparkle
-# appcast written, and attached to the release.
+# A repository's Mac build, the same for every repository: what it builds on
+# (its .github/pins.env: our libraries' XCFrameworks and Sparkle's, each from
+# its release) unpacked into .deps/, then its own Makefile.apple, the familiar
+# way:
 #
-# The repository supplies names (inputs) and hooks (scripts at fixed paths,
-# run from its root):
-#   .github/release/macos-build.sh   builds; leaves each app, by its bundle
-#                                    name, in $RELEASE_DIR (and anything its
-#                                    test needs, e.g. a server, beside it)
-#   .github/release/macos-test.sh    optional; given an app's path, tests it
-#                                    (before signing, and again once signed:
-#                                    the hardened runtime loads only frameworks
-#                                    signed by the same team)
-# Both see TAG, APP_VERSION (1.2.3, or 0.0.0-build<n> without a tag),
-# BUILD_NUMBER, RELEASE_DIR, and the repository's pins (.github/pins.env).
-# The repository is checked out in source/, each dependency beside it.
+#   make -f Makefile.apple                         build
+#   make -f Makefile.apple check                   test
+#   make -f Makefile.apple install DESTDIR=<dir>   install: each app (apps:,
+#                                                  by its bundle name), and a
+#                                                  library's XCFrameworks
+#   make -f Makefile.apple installcheck DESTDIR=<dir>   optional: test what was
+#                                                  installed; again once signed
+#                                                  (the hardened runtime loads
+#                                                  only frameworks signed by
+#                                                  the same team)
 #
-# Secrets come from the calling repository's `production` environment.
+# then packaged: each app universal, with Sparkle, zipped as
+# <Name>-macOS-<version>.zip, and for a tag signed, notarized and its Sparkle
+# appcast written; a library's XCFrameworks zipped as
+# <repository>-<version>-apple.zip for what builds on it. Uploaded, and for a
+# tag attached to the release. Secrets come from the calling repository's
+# `production` environment, read by a tag's run only.
 on:
   workflow_call:
     inputs:
@@ -32,16 +35,20 @@ on:
         description: The tag to build and attach to (empty for a push's own tag, or none)
         type: string
         default: ''
+      directory:
+        description: Where in the repository it is (its root by default)
+        type: string
+        default: .
+      library:
+        description: A library, whose XCFrameworks (make install puts them in DESTDIR) are published for what builds on it
+        type: boolean
+        default: false
       apps:
         description: >
           Space-separated Name=Bundle pairs: each app's release name and its
           bundle name (SimpleNotes=SimpleNotes, ODataWorkbench=Workbench).
           The zip is <Name>-macOS-<version>.zip; the appcast appcast.xml, or
           appcast-<Name>.xml when there are several.
-        type: string
-        required: true
-      dependencies:
-        description: Space-separated ashalkhakov repositories checked out beside source/ at their pins (<NAME>_REF in .github/pins.env, e.g. ODataKit -> ODATAKIT_REF)
         type: string
         default: ''
 
@@ -58,7 +65,7 @@ jobs:
       APPS: ${{ inputs.apps }}
     defaults:
       run:
-        working-directory: ${{ github.workspace }}/source
+        working-directory: ${{ github.workspace }}/source/${{ inputs.directory }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -76,11 +83,6 @@ jobs:
           ref: ${{ job.workflow_sha }}
           path: .release-actions
 
-      - name: Pins and dependencies
-        env:
-          DEPENDENCIES: ${{ inputs.dependencies }}
-        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/pins-and-dependencies.sh"'
-
       - name: Version
         run: '"$GITHUB_WORKSPACE/.release-actions/scripts/version.sh"'
 
@@ -96,23 +98,35 @@ jobs:
           if [ $# = 1 ]; then name=${1%%=*}; else name=$(basename "${{ inputs.repository || github.repository }}"); fi
           echo "ARTIFACT=$name-macOS-$APP_VERSION" >> "$GITHUB_ENV"
 
-      - name: Build
+      - name: What it builds on
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/deps.sh" apple'
+
+      - name: make
+        run: |
+          xcodebuild -version
+          make -f Makefile.apple
+
+      - name: make check
+        run: make -f Makefile.apple check
+
+      - name: make install
         run: |
           mkdir -p "$RELEASE_DIR"
-          ./.github/release/macos-build.sh
+          make -f Makefile.apple install DESTDIR="$RELEASE_DIR"
+          ls -la "$RELEASE_DIR"
           for pair in $APPS; do
             app="$RELEASE_DIR/${pair#*=}.app"
-            [ -d "$app" ] || { echo "::error::macos-build.sh left no ${pair#*=}.app in \$RELEASE_DIR"; exit 1; }
+            [ -d "$app" ] || { echo "::error::make install put no ${pair#*=}.app in DESTDIR"; exit 1; }
             exe=$(defaults read "$app/Contents/Info" CFBundleExecutable)
             lipo "$app/Contents/MacOS/$exe" -verify_arch arm64 x86_64
             [ -d "$app/Contents/Frameworks/Sparkle.framework" ] || { echo "::error::$(basename "$app") does not embed Sparkle.framework"; exit 1; }
           done
 
-      - name: Test
+      - name: make installcheck
         timeout-minutes: 20
         run: |
-          [ -x .github/release/macos-test.sh ] || { echo "no .github/release/macos-test.sh"; exit 0; }
-          for pair in $APPS; do ./.github/release/macos-test.sh "$RELEASE_DIR/${pair#*=}.app"; done
+          grep -q '^installcheck:' Makefile.apple || { echo "Makefile.apple has no installcheck"; exit 0; }
+          make -f Makefile.apple installcheck DESTDIR="$RELEASE_DIR"
 
       # A tag's build only: every other one is uploaded unsigned, named so.
       - name: Sign
@@ -131,12 +145,12 @@ jobs:
           done
           echo "signed=$signed" >> "$GITHUB_OUTPUT"
 
-      - name: Test, signed
+      - name: make installcheck, signed
         if: steps.sign.outputs.signed == 'true'
         timeout-minutes: 20
         run: |
-          [ -x .github/release/macos-test.sh ] || exit 0
-          for pair in $APPS; do ./.github/release/macos-test.sh "$RELEASE_DIR/${pair#*=}.app"; done
+          grep -q '^installcheck:' Makefile.apple || exit 0
+          make -f Makefile.apple installcheck DESTDIR="$RELEASE_DIR"
 
       - name: Notarize
         if: steps.sign.outputs.signed == 'true'
@@ -157,6 +171,17 @@ jobs:
           for pair in $APPS; do
             ditto -c -k --keepParent "$RELEASE_DIR/${pair#*=}.app" "$GITHUB_WORKSPACE/out/${pair%%=*}-macOS-${APP_VERSION}${suffix}.zip"
           done
+          # A library's XCFrameworks, together, as what builds on it unpacks
+          # them into its .deps/ (scripts/deps.sh).
+          if [ "${{ inputs.library }}" = true ]; then
+            name=$(basename "${{ inputs.repository || github.repository }}" | tr 'A-Z' 'a-z')
+            (cd "$RELEASE_DIR" && ls -d *.xcframework > /dev/null 2>&1) \
+              || { echo "::error::make install put no .xcframework in DESTDIR"; exit 1; }
+            # ditto, as deps.sh unpacks it: a framework is symlinks inside.
+            frameworks=$(mktemp -d)
+            cp -R "$RELEASE_DIR"/*.xcframework "$frameworks/"
+            ditto -c -k "$frameworks" "$GITHUB_WORKSPACE/out/$name-$APP_VERSION-apple.zip"
+          fi
           ls -la "$GITHUB_WORKSPACE/out"
 
       # For a release only, signed: the feed each app's Sparkle reads

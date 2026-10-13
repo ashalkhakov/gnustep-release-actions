@@ -1,10 +1,12 @@
 name: AppImage test
 description: >
-  Runs the repository's .github/release/linux-test.sh against an AppImage on
+  Smoke-tests an AppImage, as its appimage.conf says (SMOKE: the arguments to
+  start it with, under Xvfb; or SMOKE_SCRIPT: a script of the repository's,
+  given the image), on
   a clean Ubuntu, in a container: no GNUstep, no fonts, only xvfb, python3
   and the libraries every desktop has. The same Ubuntu as the runner's, so an
   image built on it can run there; the release builds and tests on 22.04.
-  Skipped, saying so, when the repository has no linux-test.sh.
+  Skipped, saying so, when appimage.conf names neither.
 inputs:
   image:
     description: The AppImage's path
@@ -22,7 +24,10 @@ runs:
         IMAGE: ${{ inputs.image }}
       run: |
         set -euo pipefail
-        [ -x .github/release/linux-test.sh ] || { echo "no .github/release/linux-test.sh"; exit 0; }
+        SMOKE=$(. .github/release/appimage.conf; echo "${SMOKE:-}")
+        SMOKE_SCRIPT=$(. .github/release/appimage.conf; echo "${SMOKE_SCRIPT:-}")
+        [ -n "$SMOKE$SMOKE_SCRIPT" ] || { echo "appimage.conf names no SMOKE or SMOKE_SCRIPT: no smoke test"; exit 0; }
+        if [ -n "$SMOKE_SCRIPT" ]; then test="./$SMOKE_SCRIPT ./$(basename "$IMAGE")"; else test="timeout 300 xvfb-run -a ./$(basename "$IMAGE") $SMOKE"; fi
         ubuntu=$(. /etc/os-release && echo "$VERSION_ID")
         name=$(basename "$IMAGE")
         copied=""
@@ -37,6 +42,6 @@ runs:
             sleep 10
           done
           rm -rf /usr/share/fonts
-          ./.github/release/linux-test.sh "./'"$name"'"' || status=$?
+          '"$test"'' || status=$?
         [ -z "$copied" ] || rm -f "$copied"
         exit $status

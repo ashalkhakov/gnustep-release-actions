@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Sample
+Comment=gnustep-release-actions' sample application
+Exec=AppRun
+Icon=sample
+Categories=Utility;
+Terminal=false

@@ -1,0 +1,212 @@
+# A repository's Linux build, the same for every repository: what it builds
+# on (its .github/pins.env: the GNUstep stack and our libraries, each an
+# archive of its release) unpacked into /opt/gnustep, then its own
+# GNUmakefile, the familiar way:
+#
+#   make                         build
+#   make check                   test (CI is set: a test that needs a service
+#                                it was not given fails rather than skips)
+#   make install DESTDIR=<dir>   install, into a staging directory
+#
+# then what was installed, packaged: for a library (library: true) an archive
+# of it, <repository>-<version>-ubuntu22.04-<arch>.tar.xz, for what builds on
+# it; for an application (.github/release/appimage.conf) an AppImage, smoke-
+# tested on a clean Ubuntu. Uploaded, and for a tag attached to the release.
+#
+# Built on Ubuntu 22.04, the oldest LTS in support: what is built on it runs
+# on anything newer.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The tag to build and release (empty for a push's own tag, or none)
+        type: string
+        default: ''
+      repository:
+        description: The repository to build (default the calling one)
+        type: string
+        default: ''
+      ref:
+        description: The commit or branch of it to build (default the tag, else the commit that started the run)
+        type: string
+        default: ''
+      directory:
+        description: Where in the repository it is (its root by default)
+        type: string
+        default: .
+      library:
+        description: A library, whose installed files are published for what builds on it (also for aarch64)
+        type: boolean
+        default: false
+      extra-packages:
+        description: The repository's own build dependencies (apt packages), beyond what the stack needs
+        type: string
+        default: ''
+      databases:
+        description: Database servers its tests use (postgres mysql mariadb), started for make check; see scripts/databases.sh
+        type: string
+        default: ''
+
+jobs:
+  linux:
+    name: Linux (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ${{ fromJSON(inputs.library && '["x86_64", "aarch64"]' || '["x86_64"]') }}
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-22.04-arm' || 'ubuntu-22.04' }}
+    timeout-minutes: 120
+    env:
+      TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+      CC: clang
+      CXX: clang++
+      LIBRARY_COMBO: ng-gnu-gnu
+      RUNTIME_VERSION: gnustep-2.0
+      PREFIX: /opt/gnustep
+      LD_LIBRARY_PATH: /opt/gnustep/lib
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}/source/${{ inputs.directory }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository || github.repository }}
+          ref: ${{ inputs.ref || inputs.tag || (github.ref_type == 'tag' && github.ref_name) || github.ref }}
+          path: source
+
+      # This workflow's own commit, whatever the caller named: its scripts
+      # and actions come from there.
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .release-actions
+
+      - name: Version
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/version.sh"'
+
+      - name: Stamp the version
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/stamp-version.sh"'
+
+      - name: What it builds on
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/deps.sh" linux'
+
+      # The packages building on the stack needs (its own list, beside it),
+      # and the repository's. From Ubuntu's archive only: the runner carries
+      # Google Chrome's and Microsoft's apt sources, which nothing here
+      # installs from, and an update straddling Google's republishing fails.
+      - name: Packages
+        env:
+          EXTRA: ${{ inputs.extra-packages }}
+        run: |
+          list=/opt/gnustep/share/gnustep-patches/packages-ubuntu.txt
+          [ -f "$list" ] || { echo "::error::no GNUstep stack in /opt/gnustep: does .github/pins.env name GNUSTEP_PATCHES_VERSION?"; exit 1; }
+          sudo rm -f /etc/apt/sources.list.d/google-chrome* /etc/apt/sources.list.d/*google* \
+                     /etc/apt/sources.list.d/microsoft* || true
+          packages=$(grep -v '^#' "$list" | tr '\n' ' ')
+          for i in 1 2 3; do
+            sudo apt-get -q -o Acquire::Retries=3 update \
+              && sudo apt-get -q -y -o Acquire::Retries=3 install $packages $EXTRA && break
+            [ "$i" != 3 ] || exit 1
+            sleep 10
+          done
+          # The gnustep-2.0 runtime needs ld.gold or lld; 22.04's binutils has gold.
+          sudo update-alternatives --install /usr/bin/ld ld /usr/bin/ld.gold 10
+          /opt/gnustep/share/gnustep-patches/build-gnustep.sh --verify-only
+          echo "GNUstep $(cat /opt/gnustep/share/gnustep-patches/VERSION)"
+
+      - name: Databases
+        if: inputs.databases != ''
+        env:
+          DATABASES: ${{ inputs.databases }}
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/databases.sh"'
+
+      - name: make
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/gnustep-make.sh"'
+
+      - name: make check
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/gnustep-make.sh" check'
+
+      - name: make install
+        run: |
+          stage=$RUNNER_TEMP/stage
+          rm -rf "$stage"
+          "$GITHUB_WORKSPACE/.release-actions/scripts/gnustep-make.sh" install DESTDIR="$stage"
+          echo "STAGE=$stage" >> "$GITHUB_ENV"
+          (cd "$stage" && find . -type f | sed 's|^\./|  /|' | head -50)
+
+      # What was installed, under opt/gnustep, as what builds on it unpacks
+      # it: at /.
+      - name: The library's archive
+        if: inputs.library
+        run: |
+          [ -d "$STAGE/opt/gnustep" ] || { echo "::error::make install put nothing under /opt/gnustep"; exit 1; }
+          name=$(basename "${{ inputs.repository || github.repository }}" | tr 'A-Z' 'a-z')
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          tar -C "$STAGE" -cJf "$GITHUB_WORKSPACE/out/$name-$APP_VERSION-ubuntu22.04-$(uname -m).tar.xz" opt
+          echo "ARTIFACT=$name-$APP_VERSION-ubuntu22.04-$(uname -m)" >> "$GITHUB_ENV"
+
+      # An application's: its AppImage (x86_64), when it has an appimage.conf.
+      - name: The image's name
+        id: name
+        if: matrix.arch == 'x86_64'
+        run: |
+          [ -f .github/release/appimage.conf ] || { echo "no .github/release/appimage.conf: no AppImage"; exit 0; }
+          image=$(. .github/release/appimage.conf; echo "${IMAGE:-}")
+          [ -n "$image" ] || { echo "::error::.github/release/appimage.conf names no IMAGE"; exit 1; }
+          echo "APPIMAGE=$image" >> "$GITHUB_ENV"
+          [ -n "${ARTIFACT:-}" ] || echo "ARTIFACT=$image-$APP_VERSION-$(uname -m)" >> "$GITHUB_ENV"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          # The image takes the apps from the prefix, beside the stack.
+          sudo cp -a "$STAGE/." /
+
+      - name: Update information
+        if: steps.name.outputs.image
+        uses: ./.release-actions/appimage-update-info
+        with:
+          tag: ${{ env.TAG }}
+          zsync: ${{ steps.name.outputs.image }}-*x86_64.AppImage.zsync
+
+      - name: The AppImage
+        id: image
+        if: steps.name.outputs.image
+        uses: ./.release-actions/appimage
+        with:
+          working-directory: ${{ github.workspace }}/source/${{ inputs.directory }}
+
+      - name: Out
+        id: out
+        if: steps.name.outputs.image
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          mv "$APPIMAGE"-*.AppImage "$GITHUB_WORKSPACE/out/"
+          mv "$APPIMAGE"-*.AppImage.zsync "$GITHUB_WORKSPACE/out/" 2>/dev/null || true
+          if [ -n "${LDAI_UPDATE_INFORMATION:-}" ] && ! ls "$GITHUB_WORKSPACE/out/"*.zsync > /dev/null 2>&1; then
+            echo "::error::a release's AppImage has no .zsync beside it"; exit 1
+          fi
+          echo "image=$(ls "$GITHUB_WORKSPACE/out/$APPIMAGE"-*.AppImage)" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test, on a clean Ubuntu 22.04
+        if: steps.name.outputs.image
+        uses: ./.release-actions/appimage-test
+        with:
+          image: ${{ steps.out.outputs.image }}
+          working-directory: ${{ github.workspace }}/source/${{ inputs.directory }}
+
+      # Named for what it is and its version; a branch's is kept two weeks, a
+      # tag's as long as artifacts are (its release keeps the files for good).
+      - uses: actions/upload-artifact@v4
+        if: env.ARTIFACT != ''
+        with:
+          name: ${{ env.ARTIFACT }}
+          path: ${{ github.workspace }}/out/*
+          if-no-files-found: error
+          retention-days: ${{ env.TAG == '' && 14 || 90 }}
+
+      - name: Attach to the release
+        if: env.TAG != '' && env.ARTIFACT != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          prerelease: ${{ contains(env.TAG, '-') }}
+          files: ${{ github.workspace }}/out/*

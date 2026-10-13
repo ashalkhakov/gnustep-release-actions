@@ -1,15 +1,19 @@
-# An iOS app's release, unsigned, the same for every repository: built by
-# the repository's hook, tested in a simulator, packaged as an .ipa (for a
-# signing step to take later) and a simulator build, uploaded, and for a tag
-# attached to the release.
+# A repository's iOS build, unsigned, the same for every repository: what it
+# builds on unpacked into .deps/ (its .github/pins.env), then its own
+# Makefile.apple:
 #
-# The repository supplies names (inputs) and hooks (run from its root):
-#   .github/release/ios-build.sh   builds; leaves each app, by bundle name, in
-#                                  $RELEASE_DIR/iphoneos (the device build) and
-#                                  $RELEASE_DIR/iphonesimulator
-#   .github/release/ios-test.sh    optional; given a simulator app's path,
-#                                  tests it in a simulator
-# Both see TAG, APP_VERSION, BUILD_NUMBER, RELEASE_DIR and the pins.
+#   make -f Makefile.apple ios                          build
+#   make -f Makefile.apple ios-check                    test
+#   make -f Makefile.apple ios-install DESTDIR=<dir>    each app (apps:, by its
+#                                                       bundle name), for a device
+#                                                       in <dir>/iphoneos and the
+#                                                       simulator in
+#                                                       <dir>/iphonesimulator
+#   make -f Makefile.apple ios-installcheck DESTDIR=<dir>   optional: test the
+#                                                       installed simulator apps
+#
+# then packaged as an .ipa (for a signing step to take later) and a simulator
+# build, uploaded, and for a tag attached to the release.
 on:
   workflow_call:
     inputs:
@@ -25,14 +29,14 @@ on:
         description: The tag to build and attach to (empty for a push's own tag, or none)
         type: string
         default: ''
+      directory:
+        description: Where in the repository it is (its root by default)
+        type: string
+        default: .
       apps:
         description: Space-separated Name=Bundle pairs (SimpleNotes-iOS=SimpleNotes); <Name>-<version>-unsigned.ipa and <Name>-Simulator-<version>.zip
         type: string
         required: true
-      dependencies:
-        description: Space-separated ashalkhakov repositories checked out beside source/ at their pins
-        type: string
-        default: ''
 
 jobs:
   ios:
@@ -44,7 +48,7 @@ jobs:
       APPS: ${{ inputs.apps }}
     defaults:
       run:
-        working-directory: ${{ github.workspace }}/source
+        working-directory: ${{ github.workspace }}/source/${{ inputs.directory }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -62,11 +66,6 @@ jobs:
           ref: ${{ job.workflow_sha }}
           path: .release-actions
 
-      - name: Pins and dependencies
-        env:
-          DEPENDENCIES: ${{ inputs.dependencies }}
-        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/pins-and-dependencies.sh"'
-
       - name: Version
         run: '"$GITHUB_WORKSPACE/.release-actions/scripts/version.sh"'
 
@@ -82,21 +81,31 @@ jobs:
           if [ $# = 1 ]; then name=${1%%=*}; else name=$(basename "${{ inputs.repository || github.repository }}"); fi
           echo "ARTIFACT=$name-iOS-$APP_VERSION" >> "$GITHUB_ENV"
 
-      - name: Build
+      - name: What it builds on
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/deps.sh" apple'
+
+      - name: make ios
+        run: make -f Makefile.apple ios
+
+      - name: make ios-check
+        timeout-minutes: 30
+        run: make -f Makefile.apple ios-check
+
+      - name: make ios-install
         run: |
           mkdir -p "$RELEASE_DIR/iphoneos" "$RELEASE_DIR/iphonesimulator"
-          ./.github/release/ios-build.sh
+          make -f Makefile.apple ios-install DESTDIR="$RELEASE_DIR"
           for pair in $APPS; do
             for sdk in iphoneos iphonesimulator; do
-              [ -d "$RELEASE_DIR/$sdk/${pair#*=}.app" ] || { echo "::error::ios-build.sh left no $sdk/${pair#*=}.app in \$RELEASE_DIR"; exit 1; }
+              [ -d "$RELEASE_DIR/$sdk/${pair#*=}.app" ] || { echo "::error::make ios-install put no $sdk/${pair#*=}.app in DESTDIR"; exit 1; }
             done
           done
 
-      - name: Test, in a simulator
+      - name: make ios-installcheck
         timeout-minutes: 30
         run: |
-          [ -x .github/release/ios-test.sh ] || { echo "no .github/release/ios-test.sh"; exit 0; }
-          for pair in $APPS; do ./.github/release/ios-test.sh "$RELEASE_DIR/iphonesimulator/${pair#*=}.app"; done
+          grep -q '^ios-installcheck:' Makefile.apple || { echo "Makefile.apple has no ios-installcheck"; exit 0; }
+          make -f Makefile.apple ios-installcheck DESTDIR="$RELEASE_DIR"
 
       - name: Package
         run: |
