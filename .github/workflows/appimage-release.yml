@@ -9,7 +9,7 @@
 #
 # The repository supplies names (inputs), its image's configuration and
 # hooks (scripts at fixed paths, run from its root):
-#   .github/release/linux-build.sh    builds its dependencies (checked out
+#   .github/release/linux-build.sh    (optional) builds its dependencies (checked out
 #                                     beside source/) and the app, and installs
 #                                     its apps and tools into the stack in
 #                                     $PREFIX (GNUSTEP_INSTALLATION_DOMAIN=SYSTEM)
@@ -24,20 +24,32 @@
 on:
   workflow_call:
     inputs:
+      repository:
+        description: The repository to build (default the calling one; gnustep-release-actions' own test builds an app's)
+        type: string
+        default: ''
+      ref:
+        description: The commit or branch of it to build (default the tag, else the commit that started the run)
+        type: string
+        default: ''
       tag:
         description: The tag to build and attach to (empty for a push's own tag, or none)
         type: string
         default: ''
       dependencies:
-        description: Space-separated ashalkhakov repositories besides gnustep-patches checked out beside source/ at their pins (FreeCoreData -> FREECOREDATA_REF)
+        description: Space-separated ashalkhakov repositories checked out beside source/ at their pins (FreeCoreData -> FREECOREDATA_REF)
         type: string
         default: ''
-      components:
-        description: What the GNUstep stack is built of
+      stack:
+        description: The GNUstep stack's image (default the newest gnustep-patches published, ghcr.io/ashalkhakov/gnustep:latest)
         type: string
-        default: libobjc2 libdispatch tools-make libs-base libs-gui libs-back eau
+        default: ghcr.io/ashalkhakov/gnustep:latest
       extra-packages:
         description: The app's own build dependencies (apt packages), beyond the stack's
+        type: string
+        default: ''
+      databases:
+        description: Database servers the tests run against (postgres mysql mariadb), started for the hooks; see scripts/databases.sh
         type: string
         default: ''
 
@@ -54,32 +66,49 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || github.ref }}
+          repository: ${{ inputs.repository || github.repository }}
+          ref: ${{ inputs.ref || inputs.tag || (github.ref_type == 'tag' && github.ref_name) || github.ref }}
           path: source
+
+      # This workflow's own commit, whatever the caller named (@v1, a branch,
+      # a commit): its scripts and actions come from there, so a change here
+      # is tested as one, and v1 is exactly what v1 holds.
 
       - uses: actions/checkout@v4
         with:
-          repository: ashalkhakov/gnustep-release-actions
-          ref: v1
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: .release-actions
 
       - name: Pins and dependencies
         env:
-          DEPENDENCIES: gnustep-patches ${{ inputs.dependencies }}
+          DEPENDENCIES: ${{ inputs.dependencies }}
         run: '"$GITHUB_WORKSPACE/.release-actions/scripts/pins-and-dependencies.sh"'
 
       - name: Version
         run: '"$GITHUB_WORKSPACE/.release-actions/scripts/version.sh"'
 
+      # The version into every Xcode project, .xcconfig, Info.plist and app
+      # GNUmakefile the repository has, before its build: the same way for
+      # every app, so no app stamps its own.
+      - name: Stamp the version
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/stamp-version.sh"'
+
       - name: GNUstep
-        uses: ashalkhakov/gnustep-release-actions/gnustep-stack@v1
+        uses: ./.release-actions/gnustep-stack
         with:
-          patches: ${{ github.workspace }}/gnustep-patches
-          components: ${{ inputs.components }}
+          image: ${{ inputs.stack }}
           extra-packages: ${{ inputs.extra-packages }}
 
+      - name: Databases
+        if: inputs.databases != ''
+        env:
+          DATABASES: ${{ inputs.databases }}
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/databases.sh"'
+
       - name: Build
-        run: ./.github/release/linux-build.sh
+        run: |
+          if [ -x .github/release/linux-build.sh ]; then ./.github/release/linux-build.sh; else echo "no .github/release/linux-build.sh"; fi
 
       - name: The image's name
         id: name
@@ -87,16 +116,17 @@ jobs:
           image=$(. .github/release/appimage.conf; echo "${IMAGE:-}")
           [ -n "$image" ] || { echo "::error::.github/release/appimage.conf names no IMAGE"; exit 1; }
           echo "APPIMAGE=$image" >> "$GITHUB_ENV"
+          echo "ARTIFACT=$image-$APP_VERSION-$(uname -m)" >> "$GITHUB_ENV"
           echo "image=$image" >> "$GITHUB_OUTPUT"
 
       - name: Update information
-        uses: ashalkhakov/gnustep-release-actions/appimage-update-info@v1
+        uses: ./.release-actions/appimage-update-info
         with:
           tag: ${{ env.TAG }}
           zsync: ${{ steps.name.outputs.image }}-*x86_64.AppImage.zsync
 
       - name: Package
-        uses: ashalkhakov/gnustep-release-actions/appimage@v1
+        uses: ./.release-actions/appimage
         with:
           working-directory: ${{ github.workspace }}/source
 
@@ -115,16 +145,20 @@ jobs:
         run: echo "image=$(ls "$GITHUB_WORKSPACE/out/$APPIMAGE"-*.AppImage)" >> "$GITHUB_OUTPUT"
 
       - name: Smoke test, on a clean Ubuntu 22.04
-        uses: ashalkhakov/gnustep-release-actions/appimage-test@v1
+        uses: ./.release-actions/appimage-test
         with:
           image: ${{ steps.image.outputs.image }}
           working-directory: ${{ github.workspace }}/source
 
+      # Named for the app and its version, like the files in it; a branch's
+      # is kept two weeks, a tag's as long as artifacts are (its release
+      # keeps the files for good).
       - uses: actions/upload-artifact@v4
         with:
-          name: Linux-${{ github.run_number }}
+          name: ${{ env.ARTIFACT }}
           path: ${{ github.workspace }}/out/*
           if-no-files-found: error
+          retention-days: ${{ env.TAG == '' && 14 || 90 }}
 
       - name: Attach to the release
         if: env.TAG != ''

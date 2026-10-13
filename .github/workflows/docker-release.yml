@@ -1,0 +1,203 @@
+# A repository's Docker images, the same for every repository that has
+# them (SimpleNotes' server, ODataKit's SDK and services): each image built
+# for amd64 and arm64, each on a runner of its own rather than under QEMU,
+# with the version stamped into the sources first; checked by the
+# repository's hook; and for a tag pushed to the GitHub Container Registry,
+# both architectures as one tag: ghcr.io/<owner>/<name>:<version>, and
+# :latest unless the tag has a '-'.
+#
+# The repository supplies names (inputs) and a hook (run from its root):
+#   .github/release/docker-test.sh <target> <image>   optional; given an
+#       image built and loaded as <image>, exercises it (starts it, talks to
+#       it); <target> is its Dockerfile target, or empty
+# Its Dockerfiles build on the GNUstep stack's image (FROM
+# ghcr.io/ashalkhakov/gnustep:latest) rather than building a stack.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The tag to build and publish (empty for a push's own tag, or none)
+        type: string
+        default: ''
+      repository:
+        description: The repository to build (default the calling one)
+        type: string
+        default: ''
+      ref:
+        description: The commit or branch of it to build (default the tag, else the commit that started the run)
+        type: string
+        default: ''
+      dockerfile:
+        description: The Dockerfile, from the repository's root
+        type: string
+        default: Docker/Dockerfile
+      images:
+        description: >
+          Space-separated target=name pairs: each image's Dockerfile target and
+          its name under ghcr.io/<owner>/ (sdk=odatakit-sdk). An empty target is
+          the Dockerfile's last stage (=simplenotes-server).
+        type: string
+        required: true
+      description:
+        description: The images' description (org.opencontainers.image.description)
+        type: string
+        default: ''
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    outputs:
+      builds: ${{ steps.plan.outputs.builds }}
+      names: ${{ steps.plan.outputs.names }}
+    steps:
+      - id: plan
+        env:
+          IMAGES: ${{ inputs.images }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          pairs = [p.split("=", 1) for p in os.environ["IMAGES"].split()]
+          arches = [("amd64", "ubuntu-24.04"), ("arm64", "ubuntu-24.04-arm")]
+          builds = [{"target": t, "name": n, "arch": a, "runner": r} for t, n in pairs for a, r in arches]
+          print("builds=" + json.dumps(builds))
+          print("names=" + json.dumps([n for _, n in pairs]))
+          PY
+
+  image:
+    name: ${{ matrix.name }} (${{ matrix.arch }})
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.builds) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+      IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}/source
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository || github.repository }}
+          ref: ${{ inputs.ref || inputs.tag || (github.ref_type == 'tag' && github.ref_name) || github.ref }}
+          path: source
+
+      # This workflow's own commit, whatever the caller named.
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .release-actions
+
+      - name: Version
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/version.sh"'
+
+      - name: Stamp the version
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/stamp-version.sh"'
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ github.workspace }}/source
+          file: ${{ github.workspace }}/source/${{ inputs.dockerfile }}
+          target: ${{ matrix.target }}
+          platforms: linux/${{ matrix.arch }}
+          build-args: VERSION=${{ env.APP_VERSION }}
+          load: true
+          tags: ${{ matrix.name }}:check
+          cache-from: type=gha,scope=${{ matrix.name }}-${{ matrix.arch }}
+          cache-to: type=gha,scope=${{ matrix.name }}-${{ matrix.arch }},mode=max
+
+      - name: Test
+        env:
+          TARGET: ${{ matrix.target }}
+          NAME: ${{ matrix.name }}
+        run: |
+          docker image ls "$NAME:check"
+          [ -x .github/release/docker-test.sh ] || { echo "no .github/release/docker-test.sh"; exit 0; }
+          ./.github/release/docker-test.sh "$TARGET" "$NAME:check"
+
+      - name: Log in to the registry
+        if: env.TAG != ''
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Pushed by digest only; publish tags the two architectures as one.
+      - name: Push
+        id: push
+        if: env.TAG != ''
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ github.workspace }}/source
+          file: ${{ github.workspace }}/source/${{ inputs.dockerfile }}
+          target: ${{ matrix.target }}
+          platforms: linux/${{ matrix.arch }}
+          build-args: VERSION=${{ env.APP_VERSION }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ inputs.repository || github.repository }}
+            org.opencontainers.image.version=${{ env.APP_VERSION }}
+            org.opencontainers.image.description=${{ inputs.description }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.name }}-${{ matrix.arch }}
+
+      - name: Keep the digest
+        if: env.TAG != ''
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        if: env.TAG != ''
+        with:
+          name: digest-${{ matrix.name }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          retention-days: 1
+
+  publish:
+    name: Publish ${{ matrix.name }}
+    if: inputs.tag != '' || github.ref_type == 'tag'
+    needs: [plan, image]
+    strategy:
+      matrix:
+        name: ${{ fromJSON(needs.plan.outputs.names) }}
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digest-${{ matrix.name }}-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/digests
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag both architectures as one
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          version="${TAG#v}"
+          sources=()
+          for digest in *; do sources+=("$IMAGE@sha256:$digest"); done
+          # A pre-release (v0.2.0-rc1: a - in it) keeps latest where it was.
+          tags=(-t "$IMAGE:$version")
+          case "$version" in *-*) ;; *) tags+=(-t "$IMAGE:latest") ;; esac
+          docker buildx imagetools create "${tags[@]}" "${sources[@]}"
+          docker buildx imagetools inspect "$IMAGE:$version"

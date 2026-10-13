@@ -1,127 +1,82 @@
 name: GNUstep stack
 description: >
-  The patched GNUstep stack an app builds on, on Ubuntu: the packages it
-  needs, CMake, and gnustep-patches' Scripts/build-gnustep.sh, cached by the
-  script's recipe hash (the script, the components, the toolchain and every
-  patch), so a release rebuilds it only when one of those changed. Restored
-  and saved apart, so the cache holds the stack before anything is
-  installed into it for packaging. Sets CC, CXX, LIBRARY_COMBO,
-  RUNTIME_VERSION, COMPONENTS, PREFIX, SOURCES and LD_LIBRARY_PATH for the
-  rest of the job.
+  The patched GNUstep stack an app builds on, on Ubuntu 22.04: taken from the
+  image gnustep-patches publishes (ghcr.io/ashalkhakov/gnustep, the newest
+  unless told otherwise), not built here. Its /opt/gnustep is copied onto the
+  runner, the packages building on it needs are installed from the list the
+  image carries (and the app's own), and the stack is verified. Sets CC, CXX,
+  LIBRARY_COMBO, RUNTIME_VERSION, PREFIX and LD_LIBRARY_PATH for the rest of
+  the job, and says which stack it is (its VERSION and MANIFEST).
 inputs:
-  patches:
-    description: A checkout of ashalkhakov/gnustep-patches, at the commit the repository pins
-    required: true
-  prefix:
-    description: Where the stack is installed
+  image:
+    description: The stack's image (a version tag, or latest)
     required: false
-    default: ${{ github.workspace }}/build
-  sources:
-    description: Where its sources are fetched
-    required: false
-    default: ${{ github.workspace }}/dependencies
-  components:
-    description: What build-gnustep.sh builds
-    required: false
-    default: libobjc2 libdispatch tools-make libs-base libs-gui libs-back eau
+    default: ghcr.io/ashalkhakov/gnustep:latest
   extra-packages:
     description: The app's own build dependencies (apt packages), beyond the stack's
     required: false
     default: ''
-  cache-key:
-    description: The cache key's prefix (the Ubuntu release and the recipe hash follow)
-    required: false
-    default: gnustep-appimage
 outputs:
-  cache-hit:
-    description: "'true' when the stack came from the cache"
-    value: ${{ steps.restore.outputs.cache-hit }}
+  version:
+    description: The stack's version (gnustep-patches' tag, less its v)
+    value: ${{ steps.stack.outputs.version }}
 runs:
   using: composite
   steps:
-    - name: Environment
+    - name: Stack
+      id: stack
       shell: bash
       env:
-        PREFIX_IN: ${{ inputs.prefix }}
-        SOURCES_IN: ${{ inputs.sources }}
-        COMPONENTS_IN: ${{ inputs.components }}
+        IMAGE: ${{ inputs.image }}
       run: |
+        set -euo pipefail
+        for i in 1 2 3; do docker pull -q "$IMAGE" && break; [ "$i" != 3 ] || exit 1; sleep 10; done
+        id=$(docker create "$IMAGE")
+        sudo rm -rf /opt/gnustep
+        sudo docker cp "$id:/opt/gnustep" /opt/gnustep
+        docker rm "$id" > /dev/null
+        sudo chown -R "$(id -u):$(id -g)" /opt/gnustep
+        d=/opt/gnustep/share/gnustep-patches
+        echo "GNUstep $(cat "$d/VERSION") from $IMAGE ($(docker image inspect -f '{{index .RepoDigests 0}}' "$IMAGE"))"
+        cat "$d/MANIFEST"
+        echo "version=$(cat "$d/VERSION")" >> "$GITHUB_OUTPUT"
         {
           echo "CC=clang"
           echo "CXX=clang++"
           echo "LIBRARY_COMBO=ng-gnu-gnu"
           echo "RUNTIME_VERSION=gnustep-2.0"
-          echo "COMPONENTS=$COMPONENTS_IN"
-          echo "PREFIX=$PREFIX_IN"
-          echo "SOURCES=$SOURCES_IN"
+          echo "PREFIX=/opt/gnustep"
           # libobjc2 and libdispatch land in the prefix's plain lib/, which
           # the gnustep layout does not treat as a library root.
-          echo "LD_LIBRARY_PATH=$PREFIX_IN/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          echo "LD_LIBRARY_PATH=/opt/gnustep/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
         } >> "$GITHUB_ENV"
 
-    # Ubuntu's mirrors fail now and then: tried three times.
+    # The image's own list (Scripts/packages-ubuntu.txt), so the runner has
+    # what the image was built with. From Ubuntu's archive only: the runner
+    # image carries Google Chrome's and Microsoft's apt sources, which nothing
+    # here installs from, and Google republishes its index several times a
+    # day, so an update straddling a republish fails on a hash mismatch.
+    # Ubuntu's mirrors fail now and then too: tried three times.
     - name: Packages
       shell: bash
       env:
         EXTRA: ${{ inputs.extra-packages }}
       run: |
-        for i in 1 2 3; do sudo apt-get -q update && break; sleep 10; done
+        set -euo pipefail
+        sudo rm -f /etc/apt/sources.list.d/google-chrome* /etc/apt/sources.list.d/*google* \
+                   /etc/apt/sources.list.d/microsoft* || true
+        packages=$(grep -v '^#' /opt/gnustep/share/gnustep-patches/packages-ubuntu.txt | tr '\n' ' ')
         for i in 1 2 3; do
-          sudo apt-get -q -y install \
-            clang pkg-config file python3-pip \
-            libgnutls28-dev gnutls-bin libffi-dev libicu-dev libxml2-dev libxslt1-dev libssl-dev zlib1g-dev \
-            libcurl4-gnutls-dev libgmp-dev libavahi-client-dev libavahi-compat-libdnssd-dev libpthread-workqueue-dev \
-            libcairo2-dev libjpeg-dev libtiff-dev libpng-dev libicns-dev liblcms2-dev \
-            libfreetype-dev libfontconfig1-dev libxrender-dev \
-            libxt-dev libxmu-dev libxft-dev libxrandr-dev libxfixes-dev libxcursor-dev \
-            fuse libfuse2 desktop-file-utils fonts-dejavu fonts-liberation \
-            $EXTRA && break
+          sudo apt-get -q -o Acquire::Retries=3 update \
+            && sudo apt-get -q -y -o Acquire::Retries=3 install $packages $EXTRA && break
+          [ "$i" != 3 ] || exit 1
           sleep 10
         done
-        if [ -x /usr/bin/ld.gold ]; then
-          sudo update-alternatives --install /usr/bin/ld ld /usr/bin/ld.gold 10
-        else
-          sudo apt-get -q -y install lld
-          sudo update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld 10
-        fi
+        # The gnustep-2.0 runtime needs ld.gold or lld; 22.04's binutils has gold.
+        sudo update-alternatives --install /usr/bin/ld ld /usr/bin/ld.gold 10
 
-    # libdispatch wants CMake 3.26 or newer, and 22.04's is 3.22: from pip,
-    # the same on a runner (which has its own) and in a container.
-    - name: CMake
+    # Checked here as it was where it was built: libdispatch's main-queue
+    # hooks in gnustep-base, ICU, the backend bundle.
+    - name: Verify
       shell: bash
-      run: |
-        python3 -m pip install --user --quiet 'cmake>=3.26'
-        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-        "$HOME/.local/bin/cmake" --version | head -1
-
-    - name: Recipe
-      id: recipe
-      shell: bash
-      env:
-        # Not PATCHES: build-gnustep.sh reads that as which patches to apply.
-        PATCHES_DIR: ${{ inputs.patches }}
-      run: |
-        . /etc/os-release
-        echo "os=ubuntu-$VERSION_ID" >> "$GITHUB_OUTPUT"
-        echo "hash=$("$PATCHES_DIR/Scripts/build-gnustep.sh" --print-recipe-hash)" >> "$GITHUB_OUTPUT"
-
-    - name: Restore
-      id: restore
-      uses: actions/cache/restore@v4
-      with:
-        path: ${{ inputs.prefix }}
-        key: ${{ inputs.cache-key }}-${{ steps.recipe.outputs.os }}-${{ steps.recipe.outputs.hash }}
-
-    - name: Build
-      if: steps.restore.outputs.cache-hit != 'true'
-      shell: bash
-      env:
-        PATCHES_DIR: ${{ inputs.patches }}
-      run: '"$PATCHES_DIR/Scripts/build-gnustep.sh"'
-
-    - name: Save
-      if: steps.restore.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v4
-      with:
-        path: ${{ inputs.prefix }}
-        key: ${{ inputs.cache-key }}-${{ steps.recipe.outputs.os }}-${{ steps.recipe.outputs.hash }}
+      run: PREFIX=/opt/gnustep /opt/gnustep/share/gnustep-patches/build-gnustep.sh --verify-only

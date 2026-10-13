@@ -28,7 +28,9 @@ outputs:
 runs:
   using: composite
   steps:
-    - uses: ashalkhakov/gnustep-release-actions/appimage-tools@v1
+    # The release workflows check this repository out at their own commit in
+    # .release-actions; its actions are used from there.
+    - uses: ./.release-actions/appimage-tools
 
     - id: image
       shell: bash
