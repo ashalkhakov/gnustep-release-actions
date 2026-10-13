@@ -1,0 +1,41 @@
+name: AppImage update information
+description: >
+  For a release tag (not a pre-release), sets LDAI_UPDATE_INFORMATION for the
+  rest of the job: linuxdeploy's AppImage plugin then embeds it and writes a
+  .zsync beside the image, which the release attaches, so AppImageUpdate,
+  Gear Lever and the like update the image from the newest release by the
+  blocks that changed. For anything else (a pre-release, which "latest"
+  would offer the release before it; a branch build) it sets nothing.
+inputs:
+  tag:
+    description: The release's tag
+    required: true
+  zsync:
+    description: The .zsync's file name in every release, a glob (e.g. SimpleNotes-*x86_64.AppImage.zsync)
+    required: true
+  repository:
+    description: owner/repo whose releases are searched (default, this one)
+    required: false
+    default: ''
+outputs:
+  information:
+    description: The update information, when there is any
+    value: ${{ steps.info.outputs.information }}
+runs:
+  using: composite
+  steps:
+    - id: info
+      shell: bash
+      env:
+        TAG: ${{ inputs.tag }}
+        ZSYNC: ${{ inputs.zsync }}
+        REPOSITORY: ${{ inputs.repository || github.repository }}
+      run: |
+        if [ -z "$TAG" ] || [[ "$TAG" == *-* ]]; then
+          echo "not a release (tag '$TAG'): no update information"
+          exit 0
+        fi
+        info="gh-releases-zsync|${REPOSITORY%%/*}|${REPOSITORY#*/}|latest|$ZSYNC"
+        echo "update information: $info"
+        echo "LDAI_UPDATE_INFORMATION=$info" >> "$GITHUB_ENV"
+        echo "information=$info" >> "$GITHUB_OUTPUT"

@@ -1,0 +1,50 @@
+name: Sparkle appcast
+description: >
+  For a release tag (vX.Y.Z, not a pre-release such as vX.Y.Z-rc1), writes
+  the appcast an app's Sparkle reads: the release's zip, its download URL on
+  the release, and its EdDSA signature by the private key given. Its feed
+  URL in the app (SUFeedURL) is then
+  https://github.com/<owner>/<repo>/releases/latest/download/<appcast>, and
+  its SUPublicEDKey the key's public half. Without a key it writes nothing
+  and says so; a key that does not match the app's SUPublicEDKey (an update
+  left unsigned) fails.
+inputs:
+  archive:
+    description: The release's zip of the signed (and notarized) app
+    required: true
+  tag:
+    description: The release's tag; none, or a pre-release's, and nothing is written
+    required: true
+  private-key:
+    description: The EdDSA private key, as generate_keys -x exports it (secrets.SPARKLE_PRIVATE_KEY)
+    required: false
+    default: ''
+  output:
+    description: The appcast's file name (one per app, when a release carries several)
+    required: false
+    default: appcast.xml
+  sparkle-version:
+    description: The Sparkle release whose generate_appcast is used; the same as the app's
+    required: false
+    default: 2.10.0
+  download-url-prefix:
+    description: Where the release's files are downloaded from (default, the tag's release on this repository)
+    required: false
+    default: ''
+outputs:
+  appcast:
+    description: The appcast's path, when one was written
+    value: ${{ steps.appcast.outputs.appcast }}
+runs:
+  using: composite
+  steps:
+    - id: appcast
+      shell: bash
+      env:
+        ARCHIVE: ${{ inputs.archive }}
+        TAG: ${{ inputs.tag }}
+        SPARKLE_PRIVATE_KEY: ${{ inputs.private-key }}
+        OUTPUT: ${{ inputs.output }}
+        SPARKLE_VERSION: ${{ inputs.sparkle-version }}
+        DOWNLOAD_URL_PREFIX: ${{ inputs.download-url-prefix }}
+      run: '"$GITHUB_ACTION_PATH/appcast.sh"'

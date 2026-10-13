@@ -1,0 +1,42 @@
+name: Notarize a macOS app
+description: >
+  Submits a signed .app to Apple's notary service and waits; on rejection
+  prints Apple's log and fails. Then staples the ticket, three tries a
+  minute apart: Apple's ticket service has dropped the runner's connection
+  mid-release, and an app that stays unstapled is still accepted by
+  Gatekeeper, which fetches the ticket itself. With no notary credentials it
+  notarizes nothing and says so.
+inputs:
+  app:
+    description: Path to the signed .app
+    required: true
+  apple-id:
+    description: secrets.NOTARY_APPLE_ID
+    required: false
+    default: ''
+  team-id:
+    description: secrets.NOTARY_TEAM_ID
+    required: false
+    default: ''
+  password:
+    description: An app-specific password (secrets.NOTARY_PASSWORD)
+    required: false
+    default: ''
+outputs:
+  notarized:
+    description: "'true' when Apple accepted the app"
+    value: ${{ steps.notarize.outputs.notarized }}
+  stapled:
+    description: "'true' when the ticket is stapled to the app"
+    value: ${{ steps.notarize.outputs.stapled }}
+runs:
+  using: composite
+  steps:
+    - id: notarize
+      shell: bash
+      env:
+        APP: ${{ inputs.app }}
+        NOTARY_APPLE_ID: ${{ inputs.apple-id }}
+        NOTARY_TEAM_ID: ${{ inputs.team-id }}
+        NOTARY_PASSWORD: ${{ inputs.password }}
+      run: '"$GITHUB_ACTION_PATH/notarize.sh"'

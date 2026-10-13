@@ -1,0 +1,52 @@
+name: AppImage tools
+description: >
+  Fetches linuxdeploy (with its AppImage plugin) at a pinned release, and
+  the type-2 AppImage runtime, and sets LINUXDEPLOY and LDAI_RUNTIME_FILE
+  for the rest of the job, which the packaging scripts honour. linuxdeploy
+  is extracted rather than run as an AppImage: a runner or a container need
+  not have FUSE.
+inputs:
+  linuxdeploy-release:
+    description: linuxdeploy's release ("continuous" for the newest; pinned so that a release builds as the last one did)
+    required: false
+    default: 1-alpha-20251107-1
+outputs:
+  linuxdeploy:
+    description: linuxdeploy's AppRun
+    value: ${{ steps.tools.outputs.linuxdeploy }}
+  runtime:
+    description: The AppImage runtime
+    value: ${{ steps.tools.outputs.runtime }}
+runs:
+  using: composite
+  steps:
+    - id: tools
+      shell: bash
+      env:
+        RELEASE: ${{ inputs.linuxdeploy-release }}
+      run: |
+        set -euo pipefail
+        arch=$(uname -m)
+        dest=$RUNNER_TEMP/linuxdeploy
+        runtime=$RUNNER_TEMP/appimage-runtime/runtime-$arch
+        if ! "$dest/AppRun" --version > /dev/null 2>&1; then
+          work=$(mktemp -d)
+          curl -fsSL -o "$work/linuxdeploy.AppImage" \
+            "https://github.com/linuxdeploy/linuxdeploy/releases/download/$RELEASE/linuxdeploy-$arch.AppImage"
+          chmod +x "$work/linuxdeploy.AppImage"
+          (cd "$work" && ./linuxdeploy.AppImage --appimage-extract > /dev/null)
+          rm -rf "$dest"
+          mv "$work/squashfs-root" "$dest"
+          rm -rf "$work"
+          chmod -R u+rwX,go+rX "$dest"
+        fi
+        version=$("$dest/AppRun" --version 2>&1) || { echo "::error::linuxdeploy at $dest does not run: $version"; exit 1; }
+        mkdir -p "$(dirname "$runtime")"
+        [ -s "$runtime" ] || curl -fsSL -o "$runtime" \
+          "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-$arch"
+        echo "linuxdeploy: $dest/AppRun (${version##*$'\n'})"
+        echo "runtime:     $runtime"
+        echo "LINUXDEPLOY=$dest/AppRun" >> "$GITHUB_ENV"
+        echo "LDAI_RUNTIME_FILE=$runtime" >> "$GITHUB_ENV"
+        echo "linuxdeploy=$dest/AppRun" >> "$GITHUB_OUTPUT"
+        echo "runtime=$runtime" >> "$GITHUB_OUTPUT"

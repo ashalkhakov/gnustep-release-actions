@@ -1,0 +1,38 @@
+name: Sign a macOS app (Developer ID)
+description: >
+  Signs an .app with the Developer ID Application identity in a base64 .p12,
+  for notarization: hardened runtime, timestamped, inside out (Sparkle's
+  helpers, every embedded framework, then the app). With no certificate it
+  signs nothing, says so, and reports signed=false, so a fork or a dry run
+  still produces an (unsigned) build.
+inputs:
+  app:
+    description: Path to the .app
+    required: true
+  certificate:
+    description: The Developer ID Application certificate and key, a base64 .p12 (secrets.MACOS_CERTIFICATE)
+    required: false
+    default: ''
+  certificate-password:
+    description: Its password (secrets.MACOS_CERTIFICATE_PASSWORD)
+    required: false
+    default: ''
+  identity:
+    description: Which identity, by name, when the .p12 holds several (secrets.MACOS_SIGN_IDENTITY)
+    required: false
+    default: ''
+outputs:
+  signed:
+    description: "'true' when the app was signed"
+    value: ${{ steps.sign.outputs.signed }}
+runs:
+  using: composite
+  steps:
+    - id: sign
+      shell: bash
+      env:
+        APP: ${{ inputs.app }}
+        CERTIFICATE: ${{ inputs.certificate }}
+        CERTIFICATE_PASSWORD: ${{ inputs.certificate-password }}
+        IDENTITY: ${{ inputs.identity }}
+      run: '"$GITHUB_ACTION_PATH/sign.sh"'
