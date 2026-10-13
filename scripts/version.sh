@@ -12,6 +12,6 @@ fi
 {
   echo "APP_VERSION=$version"
   echo "BUILD_NUMBER=$GITHUB_RUN_NUMBER"
-  echo "RELEASE_DIR=$RUNNER_TEMP/release"
+  echo "RELEASE_DIR=$RUNNER_TEMP/release-apps"
 } >> "$GITHUB_ENV"
 echo "version $version, build $GITHUB_RUN_NUMBER"
