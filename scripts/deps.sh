@@ -60,7 +60,9 @@ while read -r name version; do
       fetch "https://github.com/ashalkhakov/$repo/releases/download/v$version/$file" "$work/$file" \
         || { echo "::error::no $file in $repo's v$version release"; exit 1; }
       sudo mkdir -p /opt/gnustep && sudo chown "$(id -u):$(id -g)" /opt/gnustep
-      tar -C / -xJf "$work/$file"
+      # Into directories already there (/opt is root's) without setting
+      # their times and modes, which only their owner may.
+      tar -C / --no-overwrite-dir -xJf "$work/$file"
       echo "$repo $version: $(tar -tJf "$work/$file" | wc -l) files into /opt/gnustep"
       ;;
     apple:*)
