@@ -1,0 +1,141 @@
+# A GNUstep app's Linux release, the same for every repository: the patched
+# GNUstep stack, the repository's build, an AppImage with its update
+# information, a smoke test on a clean system, uploaded, and for a tag
+# attached to the release with its .zsync.
+#
+# Built on the oldest Ubuntu LTS still in support: an AppImage carries its
+# own libraries but not glibc, so it runs only on a system at least as new as
+# the one it was linked on.
+#
+# The repository supplies names (inputs) and hooks (scripts at fixed paths,
+# run from its root):
+#   .github/release/linux-build.sh    builds its dependencies (checked out
+#                                     beside source/) and the app, on the stack
+#                                     in $PREFIX
+#   .github/release/linux-package.sh  makes <appimage>-<version>-x86_64.AppImage
+#                                     in the repository's root, with linuxdeploy
+#                                     ($LINUXDEPLOY; LDAI_RUNTIME_FILE and, for a
+#                                     release, LDAI_UPDATE_INFORMATION are set)
+#   .github/release/linux-test.sh     given the AppImage's path, exercises it;
+#                                     run in a clean Ubuntu 22.04 container
+#                                     (xvfb, python3 and the libraries every
+#                                     desktop has; no fonts), from the root
+# All see TAG, APP_VERSION, BUILD_NUMBER and the repository's pins.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The tag to build and attach to (empty for a push's own tag, or none)
+        type: string
+        default: ''
+      appimage:
+        description: The AppImage's name before its version (SimpleNotes, ODataWorkbench-Linux)
+        type: string
+        required: true
+      dependencies:
+        description: Space-separated ashalkhakov repositories besides gnustep-patches checked out beside source/ at their pins (FreeCoreData -> FREECOREDATA_REF)
+        type: string
+        default: ''
+      components:
+        description: What the GNUstep stack is built of
+        type: string
+        default: libobjc2 libdispatch tools-make libs-base libs-gui libs-back eau
+      extra-packages:
+        description: The app's own build dependencies (apt packages), beyond the stack's
+        type: string
+        default: ''
+
+jobs:
+  appimage:
+    name: Linux AppImage
+    runs-on: ubuntu-22.04
+    timeout-minutes: 150
+    env:
+      TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+      APPIMAGE: ${{ inputs.appimage }}
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}/source
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || github.ref }}
+          path: source
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ashalkhakov/gnustep-release-actions
+          ref: v1
+          path: .release-actions
+
+      - name: Pins and dependencies
+        env:
+          DEPENDENCIES: gnustep-patches ${{ inputs.dependencies }}
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/pins-and-dependencies.sh"'
+
+      - name: Version
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/version.sh"'
+
+      - name: GNUstep
+        uses: ashalkhakov/gnustep-release-actions/gnustep-stack@v1
+        with:
+          patches: ${{ github.workspace }}/gnustep-patches
+          components: ${{ inputs.components }}
+          extra-packages: ${{ inputs.extra-packages }}
+
+      - name: Build
+        run: ./.github/release/linux-build.sh
+
+      - name: linuxdeploy and the AppImage runtime
+        uses: ashalkhakov/gnustep-release-actions/appimage-tools@v1
+
+      - name: Update information
+        uses: ashalkhakov/gnustep-release-actions/appimage-update-info@v1
+        with:
+          tag: ${{ env.TAG }}
+          zsync: ${{ inputs.appimage }}-*x86_64.AppImage.zsync
+
+      - name: Package
+        run: |
+          ./.github/release/linux-package.sh
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          set -- "$APPIMAGE"-*.AppImage
+          [ -f "$1" ] || { echo "::error::linux-package.sh made no $APPIMAGE-*.AppImage"; exit 1; }
+          mv "$APPIMAGE"-*.AppImage "$GITHUB_WORKSPACE/out/"
+          mv "$APPIMAGE"-*.AppImage.zsync "$GITHUB_WORKSPACE/out/" 2>/dev/null || true
+          if [ -n "${LDAI_UPDATE_INFORMATION:-}" ] && ! ls "$GITHUB_WORKSPACE/out/"*.zsync > /dev/null 2>&1; then
+            echo "::error::a release's AppImage has no .zsync beside it"; exit 1
+          fi
+          ls -la "$GITHUB_WORKSPACE/out"
+
+      - name: Smoke test, on a clean Ubuntu 22.04
+        run: |
+          [ -x .github/release/linux-test.sh ] || { echo "no .github/release/linux-test.sh"; exit 0; }
+          image=$(ls "$GITHUB_WORKSPACE/out/$APPIMAGE"-*.AppImage)
+          cp "$image" .
+          image=$(basename "$image")
+          chmod +x "$image"
+          docker run --rm -v "$PWD:/w" -w /w -e TAG -e APP_VERSION -e BUILD_NUMBER ubuntu:22.04 bash -c '
+            export DEBIAN_FRONTEND=noninteractive APPIMAGE_EXTRACT_AND_RUN=1
+            for i in 1 2 3; do
+              apt-get update -qq && apt-get install -y -qq --fix-missing xvfb xauth ca-certificates python3 \
+                libfontconfig1 libfreetype6 libx11-6 libx11-xcb1 libxcb1 libgl1 libharfbuzz0b > /dev/null && break
+              sleep 10
+            done
+            rm -rf /usr/share/fonts
+            ./.github/release/linux-test.sh "./'"$image"'"'
+          rm -f "$image"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Linux-${{ github.run_number }}
+          path: ${{ github.workspace }}/out/*
+          if-no-files-found: error
+
+      - name: Attach to the release
+        if: env.TAG != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          prerelease: ${{ contains(env.TAG, '-') }}
+          files: ${{ github.workspace }}/out/*

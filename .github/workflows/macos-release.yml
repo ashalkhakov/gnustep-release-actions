@@ -1,0 +1,159 @@
+# A Mac app's release, the same for every repository: built by the
+# repository's hook, tested, signed, notarized, zipped, its Sparkle appcast
+# written, uploaded, and for a tag attached to the release.
+#
+# The repository supplies names (inputs) and hooks (scripts at fixed paths,
+# run from its root):
+#   .github/release/macos-build.sh   builds; leaves each app, by its bundle
+#                                    name, in $RELEASE_DIR (and anything its
+#                                    test needs, e.g. a server, beside it)
+#   .github/release/macos-test.sh    optional; given an app's path, tests it
+#                                    (before signing, and again once signed:
+#                                    the hardened runtime loads only frameworks
+#                                    signed by the same team)
+# Both see TAG, APP_VERSION (1.2.3, or 0.0.0-build<n> without a tag),
+# BUILD_NUMBER, RELEASE_DIR, and the repository's pins (.github/pins.env).
+# The repository is checked out in source/, each dependency beside it.
+#
+# Secrets come from the calling repository's `production` environment.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The tag to build and attach to (empty for a push's own tag, or none)
+        type: string
+        default: ''
+      apps:
+        description: >
+          Space-separated Name=Bundle pairs: each app's release name and its
+          bundle name (SimpleNotes=SimpleNotes, ODataWorkbench=Workbench).
+          The zip is <Name>-macOS-<version>.zip; the appcast appcast.xml, or
+          appcast-<Name>.xml when there are several.
+        type: string
+        required: true
+      dependencies:
+        description: Space-separated ashalkhakov repositories checked out beside source/ at their pins (<NAME>_REF in .github/pins.env, e.g. ODataKit -> ODATAKIT_REF)
+        type: string
+        default: ''
+
+jobs:
+  macos:
+    name: macOS (signed)
+    runs-on: macos-15
+    timeout-minutes: 90
+    # The signing, notarization and Sparkle secrets live in this environment.
+    environment: production
+    env:
+      TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+      APPS: ${{ inputs.apps }}
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}/source
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || github.ref }}
+          path: source
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ashalkhakov/gnustep-release-actions
+          ref: v1
+          path: .release-actions
+
+      - name: Pins and dependencies
+        env:
+          DEPENDENCIES: ${{ inputs.dependencies }}
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/pins-and-dependencies.sh"'
+
+      - name: Version
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/version.sh"'
+
+      - name: Build
+        run: |
+          mkdir -p "$RELEASE_DIR"
+          ./.github/release/macos-build.sh
+          for pair in $APPS; do
+            app="$RELEASE_DIR/${pair#*=}.app"
+            [ -d "$app" ] || { echo "::error::macos-build.sh left no ${pair#*=}.app in \$RELEASE_DIR"; exit 1; }
+            exe=$(defaults read "$app/Contents/Info" CFBundleExecutable)
+            lipo "$app/Contents/MacOS/$exe" -verify_arch arm64 x86_64
+            [ -d "$app/Contents/Frameworks/Sparkle.framework" ] || { echo "::error::$(basename "$app") does not embed Sparkle.framework"; exit 1; }
+          done
+
+      - name: Test
+        run: |
+          [ -x .github/release/macos-test.sh ] || { echo "no .github/release/macos-test.sh"; exit 0; }
+          for pair in $APPS; do ./.github/release/macos-test.sh "$RELEASE_DIR/${pair#*=}.app"; done
+
+      - name: Sign
+        id: sign
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        run: |
+          signed=false
+          for pair in $APPS; do
+            out=$(mktemp)
+            APP="$RELEASE_DIR/${pair#*=}.app" GITHUB_OUTPUT="$out" "$GITHUB_WORKSPACE/.release-actions/macos-sign/sign.sh"
+            grep -q '^signed=true' "$out" && signed=true
+          done
+          echo "signed=$signed" >> "$GITHUB_OUTPUT"
+
+      - name: Test, signed
+        if: steps.sign.outputs.signed == 'true'
+        run: |
+          [ -x .github/release/macos-test.sh ] || exit 0
+          for pair in $APPS; do ./.github/release/macos-test.sh "$RELEASE_DIR/${pair#*=}.app"; done
+
+      - name: Notarize
+        if: steps.sign.outputs.signed == 'true'
+        env:
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: |
+          for pair in $APPS; do
+            APP="$RELEASE_DIR/${pair#*=}.app" GITHUB_OUTPUT=/dev/null "$GITHUB_WORKSPACE/.release-actions/macos-notarize/notarize.sh"
+          done
+
+      - name: Package
+        run: |
+          suffix=""
+          [ "${{ steps.sign.outputs.signed }}" = "true" ] || suffix="-unsigned"
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          for pair in $APPS; do
+            ditto -c -k --keepParent "$RELEASE_DIR/${pair#*=}.app" "$GITHUB_WORKSPACE/out/${pair%%=*}-macOS-${APP_VERSION}${suffix}.zip"
+          done
+          ls -la "$GITHUB_WORKSPACE/out"
+
+      # For a release only, signed: the feed each app's Sparkle reads
+      # (SUFeedURL, the newest release's appcast).
+      - name: Appcast
+        if: steps.sign.outputs.signed == 'true'
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -- $APPS
+          for pair in "$@"; do
+            name=${pair%%=*}
+            output=appcast.xml
+            [ "$#" = 1 ] || output="appcast-$name.xml"
+            ARCHIVE="$GITHUB_WORKSPACE/out/$name-macOS-$APP_VERSION.zip" OUTPUT="$GITHUB_WORKSPACE/out/$output" \
+              SPARKLE_VERSION=2.10.0 GITHUB_OUTPUT=/dev/null "$GITHUB_WORKSPACE/.release-actions/sparkle-appcast/appcast.sh"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macOS-${{ github.run_number }}
+          path: ${{ github.workspace }}/out/*
+          if-no-files-found: error
+
+      - name: Attach to the release
+        if: env.TAG != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          prerelease: ${{ contains(env.TAG, '-') }}
+          files: ${{ github.workspace }}/out/*

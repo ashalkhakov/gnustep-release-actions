@@ -18,49 +18,64 @@ here reaches every repository when it moves to the new version.
 
 Each says what it takes and what it gives in its `action.yml`.
 
-## In a release workflow
+## A repository's release: the same everywhere
 
-Pinned to a major version; `v1` moves with fixes that change no input.
+A repository does not assemble its release from these actions: it calls the
+two release workflows, which hold the whole of each job, and gives them
+names. Its `.github/workflows/release.yml` is this, with only the names its
+own:
 
 ```yaml
-# macOS
-- id: sign
-  uses: ashalkhakov/gnustep-release-actions/macos-sign@v1
-  with:
-    app: ${{ env.APP }}
-    certificate: ${{ secrets.MACOS_CERTIFICATE }}
-    certificate-password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-    identity: ${{ secrets.MACOS_SIGN_IDENTITY }}
-- if: steps.sign.outputs.signed == 'true'
-  uses: ashalkhakov/gnustep-release-actions/macos-notarize@v1
-  with:
-    app: ${{ env.APP }}
-    apple-id: ${{ secrets.NOTARY_APPLE_ID }}
-    team-id: ${{ secrets.NOTARY_TEAM_ID }}
-    password: ${{ secrets.NOTARY_PASSWORD }}
-- run: ditto -c -k --keepParent "$APP" "App-macOS-$APP_VERSION.zip"
-- if: steps.sign.outputs.signed == 'true'
-  uses: ashalkhakov/gnustep-release-actions/sparkle-appcast@v1
-  with:
-    archive: App-macOS-${{ env.APP_VERSION }}.zip
-    tag: ${{ env.TAG }}
-    private-key: ${{ secrets.SPARKLE_PRIVATE_KEY }}
-
-# Linux
-- uses: ashalkhakov/gnustep-release-actions/gnustep-stack@v1
-  with:
-    patches: ${{ github.workspace }}/gnustep-patches
-    extra-packages: libsqlite3-dev
-- uses: ashalkhakov/gnustep-release-actions/appimage-tools@v1
-- uses: ashalkhakov/gnustep-release-actions/appimage-update-info@v1
-  with:
-    tag: ${{ env.TAG }}
-    zsync: App-*x86_64.AppImage.zsync
-- run: ./Scripts/package-appimage.sh   # linuxdeploy --output appimage, as each repository has it
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'A v* tag to build and attach to its release (empty: this branch, artifacts only)'
+        default: ''
+permissions:
+  contents: write
+jobs:
+  macos:
+    uses: ashalkhakov/gnustep-release-actions/.github/workflows/macos-release.yml@v1
+    with:
+      tag: ${{ inputs.tag }}
+      apps: SimpleNotes=SimpleNotes          # Name=Bundle, space-separated
+      dependencies: ODataKit                 # checked out beside it, at its pin
+    secrets: inherit
+  appimage:
+    uses: ashalkhakov/gnustep-release-actions/.github/workflows/appimage-release.yml@v1
+    with:
+      tag: ${{ inputs.tag }}
+      appimage: SimpleNotes                  # SimpleNotes-<version>-x86_64.AppImage
+      dependencies: FreeCoreData ODataKit
+      extra-packages: libsqlite3-dev libpq-dev libmariadb-dev
 ```
 
-The release then attaches the zip, `appcast.xml`, the AppImage and its
-`.zsync`.
+What differs between apps lives in hooks, scripts at fixed paths, run from
+the repository's root:
+
+| Hook | Does |
+|---|---|
+| `.github/release/macos-build.sh` | Builds; leaves each app, by bundle name, in `$RELEASE_DIR` |
+| `.github/release/macos-test.sh <app>` | Tests an app, before signing and again once signed (optional) |
+| `.github/release/linux-build.sh` | Builds the dependencies and the app on the stack in `$PREFIX` |
+| `.github/release/linux-package.sh` | Makes `<appimage>-<version>-x86_64.AppImage` in the root, with `$LINUXDEPLOY` |
+| `.github/release/linux-test.sh <image>` | Exercises the AppImage, in a clean Ubuntu 22.04 container (optional) |
+
+They see `TAG`, `APP_VERSION` (`1.2.3`, or `0.0.0-build<n>` without a tag),
+`BUILD_NUMBER` (the run's; CFBundleVersion, which Sparkle compares) and the
+repository's pins. The workflows do the rest the same way for everyone:
+checkout, pins and dependencies, a universal binary and Sparkle checked,
+signing, notarizing, zips named `<Name>-macOS-<version>.zip`, appcasts
+(`appcast.xml`, or `appcast-<Name>.xml` for several apps), the GNUstep stack,
+update information and the `.zsync`, uploads, and a tag's release (a
+pre-release when the tag has a `-`).
+
+The actions below are what the workflows are made of; a repository uses them
+directly only for something that is not a release (its CI's stack, its pins).
 
 ## Pins: one place per repository
 
