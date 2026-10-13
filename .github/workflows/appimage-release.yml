@@ -48,6 +48,10 @@ on:
         description: The app's own build dependencies (apt packages), beyond the stack's
         type: string
         default: ''
+      databases:
+        description: Database servers the tests run against (postgres mysql mariadb), started for the hooks; see scripts/databases.sh
+        type: string
+        default: ''
 
 jobs:
   appimage:
@@ -95,6 +99,12 @@ jobs:
         with:
           image: ${{ inputs.stack }}
           extra-packages: ${{ inputs.extra-packages }}
+
+      - name: Databases
+        if: inputs.databases != ''
+        env:
+          DATABASES: ${{ inputs.databases }}
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/databases.sh"'
 
       - name: Build
         run: |

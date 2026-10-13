@@ -83,6 +83,7 @@ the repository's root:
 | `.github/release/macos-build.sh` | Builds and runs the unit tests; leaves each app, by bundle name, in `$RELEASE_DIR` |
 | `.github/release/macos-test.sh <app>` | Tests an app; for a tag, again once signed (optional) |
 | `.github/release/linux-build.sh` | Builds the dependencies and the app on the stack in `$PREFIX`, and runs the unit tests (optional) |
+| (input `databases`) | PostgreSQL, MySQL and MariaDB for the Linux tests, started for the hooks: `POSTGRES_URL`, `MYSQL_URL`, `MARIADB_URL` and their `*_CONTAINER` ([`scripts/databases.sh`](scripts/databases.sh)) |
 | `.github/release/linux-install.sh` | Installs its apps and tools into `$PREFIX` (`GNUSTEP_INSTALLATION_DOMAIN=SYSTEM`), where the image takes them from |
 | `.github/release/appimage.conf` | What the AppImage carries and starts (below) |
 | `.github/release/linux-test.sh <image>` | Exercises the AppImage, in a clean Ubuntu 22.04 container (optional) |
