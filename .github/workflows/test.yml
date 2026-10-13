@@ -10,7 +10,11 @@ name: Test
 #              with both, its Xcode build, Sparkle, the GNUstep stack, the
 #              AppImage and its smoke test on a clean Ubuntu
 #   TopoText   ios-release.yml: SimpleNotes for iOS, with ODataKit beside it,
-#              and its self-test in a simulator against its server
+#              and its self-test in a simulator against its server; and
+#              docker-release.yml: its server's image, built on the stack
+#              image and checked on SQLite, PostgreSQL and an identity provider;
+#              and appimage-release.yml with databases: its server's tests on
+#              PostgreSQL and MariaDB
 #
 # Move a pin to an app's newer commit when its hooks change.
 on:
@@ -31,19 +35,37 @@ jobs:
     uses: ./.github/workflows/macos-release.yml
     with:
       repository: ashalkhakov/UDCalc
-      ref: 186fd17be710dfdeb68c9018dc0fbaac39061838
+      ref: aa7c9a5577d06a14d36c076857f0cc40dd2419fa
       apps: UDCalc=Calculator
 
   appimage:
     uses: ./.github/workflows/appimage-release.yml
     with:
       repository: ashalkhakov/UDCalc
-      ref: 186fd17be710dfdeb68c9018dc0fbaac39061838
+      ref: aa7c9a5577d06a14d36c076857f0cc40dd2419fa
+
+  appimage-databases:
+    uses: ./.github/workflows/appimage-release.yml
+    with:
+      repository: ashalkhakov/TopoText
+      ref: 993131b206a719d8ee9f272553794553a03c4f5a
+      dependencies: FreeCoreData ODataKit
+      extra-packages: libsqlite3-dev libpq-dev libmariadb-dev
+      databases: postgres mariadb
 
   ios:
     uses: ./.github/workflows/ios-release.yml
     with:
       repository: ashalkhakov/TopoText
-      ref: 76f76d2927b1ed825908d23bfcd720a329229de4
+      ref: 993131b206a719d8ee9f272553794553a03c4f5a
       apps: SimpleNotes-iOS=SimpleNotes
       dependencies: ODataKit
+
+  docker:
+    uses: ./.github/workflows/docker-release.yml
+    with:
+      repository: ashalkhakov/TopoText
+      ref: 993131b206a719d8ee9f272553794553a03c4f5a
+      dockerfile: Docker/server.Dockerfile
+      images: =simplenotes-server
+      description: test
