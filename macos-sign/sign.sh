@@ -74,6 +74,18 @@ shopt -s nullglob
 for fw in "$APP"/Contents/Frameworks/*.framework; do
   sign "$fw"
 done
-sign "$APP"
+# The app keeps the entitlements its build gave it (a sandboxed app's
+# sandbox, Sparkle's mach-lookup names), which --force would otherwise drop;
+# all but get-task-allow, a debugging entitlement notarization refuses.
+entitlements=$RUNNER_TEMP/$(basename "$APP" .app)-entitlements.plist
+codesign -d --entitlements - --xml "$APP" 2>/dev/null > "$entitlements" || true
+if [ -s "$entitlements" ]; then
+  /usr/libexec/PlistBuddy -c "Delete :com.apple.security.get-task-allow" "$entitlements" 2>/dev/null || true
+  echo "entitlements kept:"
+  plutil -p "$entitlements"
+  sign --entitlements "$entitlements" "$APP"
+else
+  sign "$APP"
+fi
 codesign --verify --strict --verbose=2 "$APP"
 echo "signed=true" >> "$GITHUB_OUTPUT"
