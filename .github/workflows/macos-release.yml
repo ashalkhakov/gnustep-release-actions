@@ -1,6 +1,7 @@
-# A Mac app's release, the same for every repository: built by the
-# repository's hook, tested, signed, notarized, zipped, its Sparkle appcast
-# written, uploaded, and for a tag attached to the release.
+# A Mac app's build, the same for every repository, on every push and pull
+# request and for a release: built by the repository's hook, tested, zipped
+# and uploaded; and for a tag, signed and tested again, notarized, its Sparkle
+# appcast written, and attached to the release.
 #
 # The repository supplies names (inputs) and hooks (scripts at fixed paths,
 # run from its root):
@@ -19,6 +20,14 @@
 on:
   workflow_call:
     inputs:
+      repository:
+        description: The repository to build (default the calling one; gnustep-release-actions' own test builds an app's)
+        type: string
+        default: ''
+      ref:
+        description: The commit or branch of it to build (default the tag, else the commit that started the run)
+        type: string
+        default: ''
       tag:
         description: The tag to build and attach to (empty for a push's own tag, or none)
         type: string
@@ -38,10 +47,11 @@ on:
 
 jobs:
   macos:
-    name: macOS (signed)
+    name: macOS
     runs-on: macos-15
     timeout-minutes: 90
-    # The signing, notarization and Sparkle secrets live in this environment.
+    # The signing, notarization and Sparkle secrets live in this environment;
+    # only a tag's run reads them.
     environment: production
     env:
       TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
@@ -52,13 +62,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || github.ref }}
+          repository: ${{ inputs.repository || github.repository }}
+          ref: ${{ inputs.ref || inputs.tag || (github.ref_type == 'tag' && github.ref_name) || github.ref }}
           path: source
+
+      # This workflow's own commit, whatever the caller named (@v1, a branch,
+      # a commit): its scripts and actions come from there, so a change here
+      # is tested as one, and v1 is exactly what v1 holds.
 
       - uses: actions/checkout@v4
         with:
-          repository: ashalkhakov/gnustep-release-actions
-          ref: v1
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: .release-actions
 
       - name: Pins and dependencies
@@ -92,8 +107,10 @@ jobs:
           [ -x .github/release/macos-test.sh ] || { echo "no .github/release/macos-test.sh"; exit 0; }
           for pair in $APPS; do ./.github/release/macos-test.sh "$RELEASE_DIR/${pair#*=}.app"; done
 
+      # A tag's build only: every other one is uploaded unsigned, named so.
       - name: Sign
         id: sign
+        if: env.TAG != ''
         env:
           CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}

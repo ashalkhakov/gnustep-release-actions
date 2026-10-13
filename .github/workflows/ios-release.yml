@@ -13,6 +13,14 @@
 on:
   workflow_call:
     inputs:
+      repository:
+        description: The repository to build (default the calling one; gnustep-release-actions' own test builds an app's)
+        type: string
+        default: ''
+      ref:
+        description: The commit or branch of it to build (default the tag, else the commit that started the run)
+        type: string
+        default: ''
       tag:
         description: The tag to build and attach to (empty for a push's own tag, or none)
         type: string
@@ -28,7 +36,7 @@ on:
 
 jobs:
   ios:
-    name: iOS (unsigned)
+    name: iOS
     runs-on: macos-15
     timeout-minutes: 90
     env:
@@ -40,13 +48,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || github.ref }}
+          repository: ${{ inputs.repository || github.repository }}
+          ref: ${{ inputs.ref || inputs.tag || (github.ref_type == 'tag' && github.ref_name) || github.ref }}
           path: source
+
+      # This workflow's own commit, whatever the caller named (@v1, a branch,
+      # a commit): its scripts and actions come from there, so a change here
+      # is tested as one, and v1 is exactly what v1 holds.
 
       - uses: actions/checkout@v4
         with:
-          repository: ashalkhakov/gnustep-release-actions
-          ref: v1
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: .release-actions
 
       - name: Pins and dependencies

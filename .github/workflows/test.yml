@@ -1,0 +1,49 @@
+name: Test
+
+# The workflows and actions here, tested as they are in this commit, on real
+# apps, before any app uses them: a change is proven in its own pull request,
+# with nothing in an app pointed at a branch. Each app is built at a pinned
+# commit (its hooks, appimage.conf and pins.env as of then), without a tag:
+# built, tested, packaged and uploaded, nothing signed or released.
+#
+#   UDCalc     macos-release.yml and appimage-release.yml: the smallest app
+#              with both, its Xcode build, Sparkle, the GNUstep stack, the
+#              AppImage and its smoke test on a clean Ubuntu
+#   TopoText   ios-release.yml: SimpleNotes for iOS, with ODataKit beside it,
+#              and its self-test in a simulator against its server
+#
+# Move a pin to an app's newer commit when its hooks change.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    uses: ./.github/workflows/macos-release.yml
+    with:
+      repository: ashalkhakov/UDCalc
+      ref: 186fd17be710dfdeb68c9018dc0fbaac39061838
+      apps: UDCalc=Calculator
+
+  appimage:
+    uses: ./.github/workflows/appimage-release.yml
+    with:
+      repository: ashalkhakov/UDCalc
+      ref: 186fd17be710dfdeb68c9018dc0fbaac39061838
+
+  ios:
+    uses: ./.github/workflows/ios-release.yml
+    with:
+      repository: ashalkhakov/TopoText
+      ref: 76f76d2927b1ed825908d23bfcd720a329229de4
+      apps: SimpleNotes-iOS=SimpleNotes
+      dependencies: ODataKit
