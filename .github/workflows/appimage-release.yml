@@ -9,7 +9,7 @@
 #
 # The repository supplies names (inputs), its image's configuration and
 # hooks (scripts at fixed paths, run from its root):
-#   .github/release/linux-build.sh    builds its dependencies (checked out
+#   .github/release/linux-build.sh    (optional) builds its dependencies (checked out
 #                                     beside source/) and the app, and installs
 #                                     its apps and tools into the stack in
 #                                     $PREFIX (GNUSTEP_INSTALLATION_DOMAIN=SYSTEM)
@@ -85,7 +85,8 @@ jobs:
           extra-packages: ${{ inputs.extra-packages }}
 
       - name: Build
-        run: ./.github/release/linux-build.sh
+        run: |
+          if [ -x .github/release/linux-build.sh ]; then ./.github/release/linux-build.sh; else echo "no .github/release/linux-build.sh"; fi
 
       - name: The image's name
         id: name

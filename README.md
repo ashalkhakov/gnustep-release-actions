@@ -63,7 +63,7 @@ the repository's root:
 |---|---|
 | `.github/release/macos-build.sh` | Builds; leaves each app, by bundle name, in `$RELEASE_DIR` |
 | `.github/release/macos-test.sh <app>` | Tests an app, before signing and again once signed (optional) |
-| `.github/release/linux-build.sh` | Builds the dependencies and the app on the stack in `$PREFIX` |
+| `.github/release/linux-build.sh` | Builds the dependencies and the app on the stack in `$PREFIX`, and runs its tests (optional) |
 | `.github/release/linux-install.sh` | Installs its apps and tools into `$PREFIX` (`GNUSTEP_INSTALLATION_DOMAIN=SYSTEM`), where the image takes them from; run by the `appimage` action |
 | `.github/release/appimage.conf` | What the AppImage carries and starts (below) |
 | `.github/release/linux-test.sh <image>` | Exercises the AppImage, in a clean Ubuntu 22.04 container (optional) |
