@@ -1,0 +1,42 @@
+name: AppImage test
+description: >
+  Runs the repository's .github/release/linux-test.sh against an AppImage on
+  a clean Ubuntu, in a container: no GNUstep, no fonts, only xvfb, python3
+  and the libraries every desktop has. The same Ubuntu as the runner's, so an
+  image built on it can run there; the release builds and tests on 22.04.
+  Skipped, saying so, when the repository has no linux-test.sh.
+inputs:
+  image:
+    description: The AppImage's path
+    required: true
+  working-directory:
+    description: The repository's root (the test runs from there, mounted at /w)
+    required: false
+    default: .
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        IMAGE: ${{ inputs.image }}
+      run: |
+        set -euo pipefail
+        [ -x .github/release/linux-test.sh ] || { echo "no .github/release/linux-test.sh"; exit 0; }
+        ubuntu=$(. /etc/os-release && echo "$VERSION_ID")
+        name=$(basename "$IMAGE")
+        copied=""
+        if [ ! -e "$name" ]; then cp "$IMAGE" "$name"; copied=$name; fi
+        chmod +x "$name"
+        status=0
+        docker run --rm -v "$PWD:/w" -w /w -e TAG -e APP_VERSION -e BUILD_NUMBER "ubuntu:$ubuntu" bash -c '
+          export DEBIAN_FRONTEND=noninteractive APPIMAGE_EXTRACT_AND_RUN=1
+          for i in 1 2 3; do
+            apt-get update -qq && apt-get install -y -qq --fix-missing xvfb xauth ca-certificates python3 \
+              libfontconfig1 libfreetype6 libx11-6 libx11-xcb1 libxcb1 libgl1 libharfbuzz0b > /dev/null && break
+            sleep 10
+          done
+          rm -rf /usr/share/fonts
+          ./.github/release/linux-test.sh "./'"$name"'"' || status=$?
+        [ -z "$copied" ] || rm -f "$copied"
+        exit $status

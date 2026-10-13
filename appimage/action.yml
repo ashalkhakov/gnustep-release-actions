@@ -1,0 +1,52 @@
+name: AppImage
+description: >
+  A GNUstep app's AppImage, the same for every app (appimage.sh): its apps and
+  tools, installed into the GNUstep prefix by the repository's
+  .github/release/linux-install.sh when it has one, the runtime, the
+  Eau theme, fonts, the opener and the shared launcher (AppRun), made into
+  <IMAGE>-<version>-<arch>.AppImage in the repository's root. What is the
+  app's own is in its appimage.conf. linuxdeploy and the AppImage runtime are
+  fetched here (appimage-tools); for a release, set LDAI_UPDATE_INFORMATION
+  first (appimage-update-info) and a .zsync is written beside the image.
+inputs:
+  config:
+    description: The app's appimage.conf, from the repository's root
+    required: false
+    default: .github/release/appimage.conf
+  version:
+    description: The version in the image's name (default APP_VERSION, else dev)
+    required: false
+    default: ''
+  working-directory:
+    description: The repository's root
+    required: false
+    default: .
+outputs:
+  image:
+    description: The AppImage's path
+    value: ${{ steps.image.outputs.image }}
+runs:
+  using: composite
+  steps:
+    - uses: ashalkhakov/gnustep-release-actions/appimage-tools@v1
+
+    - id: image
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        CONFIG: ${{ inputs.config }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        # What packaging reads (file, desktop-file-validate) and the fonts the
+        # image carries, when the machine lacks them.
+        if ! command -v file > /dev/null || ! command -v desktop-file-validate > /dev/null \
+           || [ ! -d /usr/share/fonts/truetype/liberation ] || [ ! -d /usr/share/fonts/truetype/dejavu ]; then
+          sudo apt-get -q update && sudo apt-get -q -y install file desktop-file-utils fonts-dejavu-core fonts-liberation
+        fi
+        # The app's apps and tools into the prefix, where the image takes
+        # them from: the repository's own few make lines.
+        if [ -x .github/release/linux-install.sh ]; then ./.github/release/linux-install.sh; fi
+        APP_VERSION=${VERSION:-${APP_VERSION:-dev}} "$GITHUB_ACTION_PATH/appimage.sh" "$CONFIG"
+        image=$(ls -t "$(. "$CONFIG"; echo "$IMAGE")"-*.AppImage | head -n 1)
+        echo "image=$(pwd)/$image" >> "$GITHUB_OUTPUT"
