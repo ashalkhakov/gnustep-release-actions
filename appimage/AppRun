@@ -1,0 +1,180 @@
+#!/bin/sh
+# Every GNUstep AppImage's entry point, the same in every app's image. What
+# is the app's own -- its name, the apps and tools it carries, which one a
+# keyword starts -- is in usr/share/gnustep-appimage/appimage.conf, which
+# appimage.sh writes from the repository's .github/release/appimage.conf.
+#
+#   <image>                     DEFAULT, or for arguments WITH_ARGUMENTS, or
+#                               for a path WITH_FILE
+#   <image> <keyword> ...       the app or tool ROUTES gives the keyword; the
+#                               rest of the arguments are its
+#   ln -s <image> <name>        the same, for a name containing a keyword
+#   APPIMAGE_GDB=1 <image> ...  under gdb; then `run`, reproduce, `bt`
+#
+# GNUstep finds its libraries, backend and the apps through paths that are
+# not known until the image is mounted, so its configuration is written
+# here, each time.
+set -eu
+
+HERE="$(dirname "$(readlink -f "$0")")"
+. "$HERE/usr/share/gnustep-appimage/appimage.conf"
+low=$(printf '%s' "$NAME" | tr 'A-Z' 'a-z')
+
+export GNUSTEP_CONFIG_FILE="/tmp/GNUstep-$NAME-$$.conf"
+cat << IN_EOF > "$GNUSTEP_CONFIG_FILE"
+GNUSTEP_USER_CONFIG_FILE=.GNUstep.conf
+GNUSTEP_USER_DEFAULTS_DIR=GNUstep/Defaults
+GNUSTEP_SYSTEM_USERS_DIR=/home
+GNUSTEP_NETWORK_USERS_DIR=/home
+GNUSTEP_LOCAL_USERS_DIR=/home
+GNUSTEP_SYSTEM_ROOT=$HERE/usr/System
+GNUSTEP_SYSTEM_LIBRARIES=$HERE/usr/System/Library
+GNUSTEP_SYSTEM_LIBRARY=$HERE/usr/System/Library
+GNUSTEP_SYSTEM_TOOLS=$HERE/usr/System/Tools
+GNUSTEP_SYSTEM_APPS=$HERE/usr/System/Applications
+GNUSTEP_LOCAL_ROOT=$HERE/usr/Local
+GNUSTEP_LOCAL_LIBRARY=$HERE/usr/Local/Library
+GNUSTEP_LOCAL_TOOLS=$HERE/usr/Local/Tools
+GNUSTEP_LOCAL_APPS=$HERE/usr/Local/Applications
+IN_EOF
+chmod 600 "$GNUSTEP_CONFIG_FILE"
+
+export GNUSTEP_SYSTEM_ROOT="$HERE/usr/System"
+export GNUSTEP_SYSTEM_LIBRARY="$HERE/usr/System/Library"
+export GNUSTEP_SYSTEM_TOOLS="$HERE/usr/System/Tools"
+export GNUSTEP_SYSTEM_APPS="$HERE/usr/System/Applications"
+export GNUSTEP_LOCAL_ROOT="$HERE/usr/Local"
+export GNUSTEP_LOCAL_LIBRARY="$HERE/usr/Local/Library"
+export GNUSTEP_LOCAL_TOOLS="$HERE/usr/Local/Tools"
+export GNUSTEP_LOCAL_APPS="$HERE/usr/Local/Applications"
+
+# Saved before they are pointed at the image: the opener (usr/bin/open) puts
+# these back before handing a URL to the host's browser, and gdb runs with
+# them; neither can run against the libraries this image carries.
+export APPIMAGE_HOST_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+export APPIMAGE_HOST_PATH="$PATH"
+
+export LD_LIBRARY_PATH="$HERE/usr/lib:$HERE/usr/Local/Library/Libraries:$HERE/usr/System/Library/Libraries:${LD_LIBRARY_PATH:-}"
+export PATH="$HERE/usr/bin:$HERE/usr/System/Tools:$PATH"
+
+# Fontconfig for the fonts the image carries, plus whatever the host has,
+# so the window lays out the same on a machine that has none of them.
+# Written here with the image's path: fontconfig before 2.14 (Ubuntu 22.04's,
+# Debian 12's) does not read a directory relative to the configuration file,
+# and without a font GNUstep cannot lay out a xib's text, so the window does
+# not load. Its cache is kept between launches: a new one each time made
+# every start scan every font on the machine, which on a desktop with many
+# takes long.
+FONT_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/$NAME/fontconfig"
+mkdir -p "$FONT_CACHE" 2>/dev/null || FONT_CACHE="/tmp/fc-cache-$low-$(id -u)"
+mkdir -p "$FONT_CACHE"
+export FONTCONFIG_FILE="/tmp/fonts-$low-$$.conf"
+cat << IN_EOF > "$FONTCONFIG_FILE"
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+  <dir>$HERE/usr/share/fonts</dir>
+  <dir>/usr/share/fonts</dir>
+  <dir>~/.fonts</dir>
+  <cachedir>$FONT_CACHE</cachedir>
+  <config><rescan><int>30</int></rescan></config>
+</fontconfig>
+IN_EOF
+trap 'rm -f "$GNUSTEP_CONFIG_FILE" "$FONTCONFIG_FILE"' EXIT
+
+# The Eau theme and the Liberation fonts the image carries, the opener, and
+# Ctrl as Command, as on any other Linux window, in each app's defaults
+# domains (DOMAINS: its name and its bundle identifier). Only what the user
+# has not set: a theme or font chosen by hand stays.
+#
+# GSUnknownFileTool: what NSWorkspace runs for a URL or a file it has no
+# application for -- the image's opener, in its GNUstep Tools, which
+# [NSTask launchPathForTool:] searches before $PATH.
+#
+# The keys: GNUstep's default modifier map is NeXT's -- Alt_L is COMMAND and
+# both Control keys are CONTROL -- so on a Linux desktop an app would answer
+# Alt+S where every other window answers Ctrl+S (gnustep-gui's KeyboardSetup).
+# The left Control becomes COMMAND, which a menu key equivalent fires on, and
+# stops being CONTROL: one key acting as both fires a menu item and a text
+# binding from the same press. The right Control stays a real CONTROL, for
+# the emacs-style text bindings, and Alt goes back to being ALTERNATE.
+DEFAULTS_TOOL=$(find "$HERE/usr" -name defaults -type f -perm -111 | head -n 1)
+if [ -n "$DEFAULTS_TOOL" ]; then
+  set_default() {
+    "$DEFAULTS_TOOL" read "$1" "$2" > /dev/null 2>&1 || "$DEFAULTS_TOOL" write "$1" "$2" "$3"
+  }
+  for domain in $DOMAINS; do
+    set_default "$domain" GSTheme Eau
+    set_default "$domain" NSFont LiberationSans
+    set_default "$domain" NSBoldFont LiberationSans-Bold
+    set_default "$domain" NSUserFont LiberationSans
+    set_default "$domain" NSUserFixedPitchFont "${FIXED_PITCH_FONT:-LiberationMono}"
+    set_default "$domain" GSUnknownFileTool open
+    set_default "$domain" GSFirstCommandKey Control_L
+    set_default "$domain" GSFirstControlKey NoSymbol
+    set_default "$domain" GSSecondControlKey Control_R
+    set_default "$domain" GSFirstAlternateKey Alt_L
+    set_default "$domain" GSSecondAlternateKey Alt_R
+  done
+fi
+
+# Which starts. ROUTES is "keyword,keyword=Target ...": a symlink the image
+# was run through whose name contains a keyword (not the image's own name,
+# which may contain one), then a first argument that is one (taken off; the
+# rest is the target's). Otherwise arguments go to WITH_ARGUMENTS, a path to
+# WITH_FILE, and with neither, DEFAULT.
+route() {  # route <word> <exact|within>: the target, or nothing
+  word=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
+  for r in ${ROUTES:-}; do
+    keys=$(printf '%s' "${r%%=*}" | tr 'A-Z' 'a-z'); IFS=,
+    for k in $keys; do
+      case "$2:$word" in
+        exact:"$k"|within:*"$k"*) unset IFS; echo "${r#*=}"; return ;;
+      esac
+    done
+    unset IFS
+  done
+}
+TARGET=""
+self=$(basename "${ARGV0:-$0}")
+case "$self" in
+  *.AppImage|*.appimage|AppRun) ;;
+  *) TARGET=$(route "$self" within) ;;
+esac
+if [ $# -gt 0 ]; then
+  first=$(route "$1" exact)
+  if [ -n "$first" ]; then
+    TARGET=$first; shift
+  elif [ -z "$TARGET" ]; then
+    case "$1" in
+      -*) TARGET=${WITH_ARGUMENTS:-} ;;
+      *) TARGET=${WITH_FILE:-${WITH_ARGUMENTS:-}} ;;
+    esac
+  fi
+fi
+TARGET=${TARGET:-$DEFAULT}
+
+# An app where gnustep-make installs it (the executable inside the wrapper:
+# NSBundle finds the main bundle from where the executable sits); a tool by
+# name in the GNUstep Tools. Found by name, not by `file`, which a desktop
+# need not have.
+BIN=""
+for domain in System Local; do
+  if [ -x "$HERE/usr/$domain/Applications/$TARGET.app/$TARGET" ]; then
+    BIN="$HERE/usr/$domain/Applications/$TARGET.app/$TARGET"; break
+  fi
+done
+[ -n "$BIN" ] || BIN=$(find "$HERE/usr/System/Tools" "$HERE/usr/Local/Tools" -type f -name "$TARGET" -perm -111 2>/dev/null | head -n 1)
+[ -n "$BIN" ] || { echo "$NAME: no $TARGET in this image" >&2; exit 127; }
+
+# gdb itself must run against the host's libraries -- started inside this
+# environment it loads the image's and dies before the prompt -- so it gets
+# the host's paths back and applies the image's to the program alone,
+# through its exec wrapper.
+if [ -n "${APPIMAGE_GDB:-}" ]; then
+  exec env LD_LIBRARY_PATH="$APPIMAGE_HOST_LD_LIBRARY_PATH" PATH="$APPIMAGE_HOST_PATH" \
+    gdb -iex "set exec-wrapper env LD_LIBRARY_PATH=$LD_LIBRARY_PATH PATH=$PATH" \
+        --args "$BIN" "$@"
+fi
+
+exec "$BIN" "$@"

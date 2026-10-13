@@ -12,6 +12,7 @@ here reaches every repository when it moves to the new version.
 | [`macos-notarize`](macos-notarize/action.yml) | Notarizes it (Apple's log on rejection), staples the ticket with retries, Gatekeeper's check |
 | [`sparkle-appcast`](sparkle-appcast/action.yml) | A release's Sparkle appcast, signed with the EdDSA key |
 | [`appimage-update-info`](appimage-update-info/action.yml) | A release's AppImage update information, so the image updates itself from the newest release |
+| [`appimage`](appimage/action.yml) | A GNUstep app's AppImage from its `appimage.conf`: the runtime, theme, fonts, opener and the shared launcher ([`AppRun`](appimage/AppRun)), the same in every app's image |
 | [`appimage-tools`](appimage-tools/action.yml) | linuxdeploy (pinned) and the AppImage runtime |
 | [`gnustep-stack`](gnustep-stack/action.yml) | The patched GNUstep stack (gnustep-patches' `build-gnustep.sh`), cached by its recipe |
 | [`pins`](pins/action.yml) | Loads the repository's pins (`.github/pins.env`) into the job's environment |
@@ -49,7 +50,6 @@ jobs:
     uses: ashalkhakov/gnustep-release-actions/.github/workflows/appimage-release.yml@v1
     with:
       tag: ${{ inputs.tag }}
-      appimage: SimpleNotes                  # SimpleNotes-<version>-x86_64.AppImage
       dependencies: FreeCoreData ODataKit
       extra-packages: libsqlite3-dev libpq-dev libmariadb-dev
 ```
@@ -61,8 +61,7 @@ the repository's root:
 |---|---|
 | `.github/release/macos-build.sh` | Builds; leaves each app, by bundle name, in `$RELEASE_DIR` |
 | `.github/release/macos-test.sh <app>` | Tests an app, before signing and again once signed (optional) |
-| `.github/release/linux-build.sh` | Builds the dependencies and the app on the stack in `$PREFIX` |
-| `.github/release/linux-package.sh` | Makes `<appimage>-<version>-x86_64.AppImage` in the root, with `$LINUXDEPLOY` |
+| `.github/release/linux-build.sh` | Builds the dependencies and the app on the stack in `$PREFIX`, and installs its apps and tools there (`GNUSTEP_INSTALLATION_DOMAIN=SYSTEM`) |
 | `.github/release/linux-test.sh <image>` | Exercises the AppImage, in a clean Ubuntu 22.04 container (optional) |
 | `.github/release/ios-build.sh` | Builds the iOS app(s) into `$RELEASE_DIR/iphoneos` and `$RELEASE_DIR/iphonesimulator` (`ios-release.yml`) |
 | `.github/release/ios-test.sh <app>` | Tests a simulator build (optional) |
@@ -75,6 +74,40 @@ signing, notarizing, zips named `<Name>-macOS-<version>.zip`, appcasts
 (`appcast.xml`, or `appcast-<Name>.xml` for several apps), the GNUstep stack,
 update information and the `.zsync`, uploads, and a tag's release (a
 pre-release when the tag has a `-`).
+
+## The AppImage: one launcher, one packager
+
+An app does not carry its own `AppRun`, opener, fontconfig or packaging
+scripts: those are [`appimage/`](appimage/)'s, and a fix there reaches every
+app's next image. What is the app's own is a few names, in
+`.github/release/appimage.conf`:
+
+```sh
+IMAGE=SimpleNotes                         # SimpleNotes-<version>-x86_64.AppImage
+NAME=SimpleNotes                          # its caches and temporary files
+APPS="SimpleNotes"                        # the .app wrappers it carries
+TOOLS="simplenotes-server"                # the command-line tools
+DEFAULT=SimpleNotes                       # what opening the image starts
+ROUTES="server,--server,simplenotes-server=simplenotes-server app,simplenotes=SimpleNotes"
+ENTRIES="Scripts/appimage/simplenotes.desktop=Examples/SimpleNotes/Icons/SimpleNotes.png"
+METAINFO=Scripts/appimage/io.github.ashalkhakov.SimpleNotes.appdata.xml
+LOADED="libCD*Store.so"                   # loaded at run time, not linked
+REQUIRE="SimpleNotes.momd"                # must be in the image
+```
+
+[`appimage.sh`](appimage/appimage.sh) lists every name and what it does
+(`WITH_ARGUMENTS`, `WITH_FILE` and `FIXED_PITCH_FONT` too). The release
+workflow and a repository's CI make the image the same way, after the build
+has installed the app into the prefix:
+
+```yaml
+- run: ./.github/release/linux-build.sh
+- uses: ashalkhakov/gnustep-release-actions/appimage@v1
+```
+
+The image's launcher gives every app the Eau theme, the fonts it carries
+(with a fontconfig written at launch), the opener for URLs, Ctrl as Command,
+and `APPIMAGE_GDB=1` to run under gdb.
 
 The actions below are what the workflows are made of; a repository uses them
 directly only for something that is not a release (its CI's stack, its pins).

@@ -1,0 +1,42 @@
+name: AppImage
+description: >
+  A GNUstep app's AppImage, the same for every app (appimage.sh): its apps and
+  tools as its build installed them into the GNUstep prefix, the runtime, the
+  Eau theme, fonts, the opener and the shared launcher (AppRun), made into
+  <IMAGE>-<version>-<arch>.AppImage in the repository's root. What is the
+  app's own is in its appimage.conf. linuxdeploy and the AppImage runtime are
+  fetched here (appimage-tools); for a release, set LDAI_UPDATE_INFORMATION
+  first (appimage-update-info) and a .zsync is written beside the image.
+inputs:
+  config:
+    description: The app's appimage.conf, from the repository's root
+    required: false
+    default: .github/release/appimage.conf
+  version:
+    description: The version in the image's name (default APP_VERSION, else dev)
+    required: false
+    default: ''
+  working-directory:
+    description: The repository's root
+    required: false
+    default: .
+outputs:
+  image:
+    description: The AppImage's path
+    value: ${{ steps.image.outputs.image }}
+runs:
+  using: composite
+  steps:
+    - uses: ashalkhakov/gnustep-release-actions/appimage-tools@v1
+
+    - id: image
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        CONFIG: ${{ inputs.config }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        APP_VERSION=${VERSION:-${APP_VERSION:-dev}} "$GITHUB_ACTION_PATH/appimage.sh" "$CONFIG"
+        image=$(ls -t "$(. "$CONFIG"; echo "$IMAGE")"-*.AppImage | head -n 1)
+        echo "image=$(pwd)/$image" >> "$GITHUB_OUTPUT"

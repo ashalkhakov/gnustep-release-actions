@@ -7,15 +7,15 @@
 # own libraries but not glibc, so it runs only on a system at least as new as
 # the one it was linked on.
 #
-# The repository supplies names (inputs) and hooks (scripts at fixed paths,
-# run from its root):
+# The repository supplies names (inputs), its image's configuration and
+# hooks (scripts at fixed paths, run from its root):
 #   .github/release/linux-build.sh    builds its dependencies (checked out
-#                                     beside source/) and the app, on the stack
-#                                     in $PREFIX
-#   .github/release/linux-package.sh  makes <appimage>-<version>-x86_64.AppImage
-#                                     in the repository's root, with linuxdeploy
-#                                     ($LINUXDEPLOY; LDAI_RUNTIME_FILE and, for a
-#                                     release, LDAI_UPDATE_INFORMATION are set)
+#                                     beside source/) and the app, and installs
+#                                     its apps and tools into the stack in
+#                                     $PREFIX (GNUSTEP_INSTALLATION_DOMAIN=SYSTEM)
+#   .github/release/appimage.conf     what the image carries and starts; the
+#                                     image itself is the appimage action's
+#                                     (appimage/appimage.sh), the same for all
 #   .github/release/linux-test.sh     given the AppImage's path, exercises it;
 #                                     run in a clean Ubuntu 22.04 container
 #                                     (xvfb, python3 and the libraries every
@@ -28,10 +28,6 @@ on:
         description: The tag to build and attach to (empty for a push's own tag, or none)
         type: string
         default: ''
-      appimage:
-        description: The AppImage's name before its version (SimpleNotes, ODataWorkbench-Linux)
-        type: string
-        required: true
       dependencies:
         description: Space-separated ashalkhakov repositories besides gnustep-patches checked out beside source/ at their pins (FreeCoreData -> FREECOREDATA_REF)
         type: string
@@ -52,7 +48,6 @@ jobs:
     timeout-minutes: 150
     env:
       TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
-      APPIMAGE: ${{ inputs.appimage }}
     defaults:
       run:
         working-directory: ${{ github.workspace }}/source
@@ -86,21 +81,28 @@ jobs:
       - name: Build
         run: ./.github/release/linux-build.sh
 
-      - name: linuxdeploy and the AppImage runtime
-        uses: ashalkhakov/gnustep-release-actions/appimage-tools@v1
+      - name: The image's name
+        id: name
+        run: |
+          image=$(. .github/release/appimage.conf; echo "${IMAGE:-}")
+          [ -n "$image" ] || { echo "::error::.github/release/appimage.conf names no IMAGE"; exit 1; }
+          echo "APPIMAGE=$image" >> "$GITHUB_ENV"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
 
       - name: Update information
         uses: ashalkhakov/gnustep-release-actions/appimage-update-info@v1
         with:
           tag: ${{ env.TAG }}
-          zsync: ${{ inputs.appimage }}-*x86_64.AppImage.zsync
+          zsync: ${{ steps.name.outputs.image }}-*x86_64.AppImage.zsync
 
       - name: Package
+        uses: ashalkhakov/gnustep-release-actions/appimage@v1
+        with:
+          working-directory: ${{ github.workspace }}/source
+
+      - name: Out
         run: |
-          ./.github/release/linux-package.sh
           mkdir -p "$GITHUB_WORKSPACE/out"
-          set -- "$APPIMAGE"-*.AppImage
-          [ -f "$1" ] || { echo "::error::linux-package.sh made no $APPIMAGE-*.AppImage"; exit 1; }
           mv "$APPIMAGE"-*.AppImage "$GITHUB_WORKSPACE/out/"
           mv "$APPIMAGE"-*.AppImage.zsync "$GITHUB_WORKSPACE/out/" 2>/dev/null || true
           if [ -n "${LDAI_UPDATE_INFORMATION:-}" ] && ! ls "$GITHUB_WORKSPACE/out/"*.zsync > /dev/null 2>&1; then
