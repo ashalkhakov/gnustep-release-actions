@@ -10,8 +10,10 @@
 #   .github/release/docker-test.sh <target> <image>   optional; given an
 #       image built and loaded as <image>, exercises it (starts it, talks to
 #       it); <target> is its Dockerfile target, or empty
-# Its Dockerfiles build on the GNUstep stack's image (FROM
-# ghcr.io/ashalkhakov/gnustep:latest) rather than building a stack.
+# Its Dockerfiles take what they build on as CI does: the stack's and our
+# libraries' archives, by the versions in .github/pins.env, which are passed
+# to the build as build arguments of the same names (GNUSTEP_PATCHES_VERSION,
+# FREECOREDATA_VERSION, ...), with VERSION, the version being built.
 on:
   workflow_call:
     inputs:
@@ -27,8 +29,12 @@ on:
         description: The commit or branch of it to build (default the tag, else the commit that started the run)
         type: string
         default: ''
+      directory:
+        description: Where in the repository it is (its root by default); the Dockerfile and the build's context are there
+        type: string
+        default: .
       dockerfile:
-        description: The Dockerfile, from the repository's root
+        description: The Dockerfile, from that directory
         type: string
         default: Docker/Dockerfile
       images:
@@ -78,7 +84,7 @@ jobs:
       IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
     defaults:
       run:
-        working-directory: ${{ github.workspace }}/source
+        working-directory: ${{ github.workspace }}/source/${{ inputs.directory }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -99,16 +105,26 @@ jobs:
       - name: Stamp the version
         run: '"$GITHUB_WORKSPACE/.release-actions/scripts/stamp-version.sh"'
 
+      - name: Build arguments
+        run: |
+          {
+            echo "args<<ARGS"
+            echo "VERSION=$APP_VERSION"
+            [ ! -f .github/pins.env ] || sed -n 's/^\([A-Z0-9_]*_VERSION=.*\)$/\1/p' .github/pins.env
+            echo "ARGS"
+          } >> "$GITHUB_OUTPUT"
+        id: args
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Build
         uses: docker/build-push-action@v6
         with:
-          context: ${{ github.workspace }}/source
-          file: ${{ github.workspace }}/source/${{ inputs.dockerfile }}
+          context: ${{ github.workspace }}/source/${{ inputs.directory }}
+          file: ${{ github.workspace }}/source/${{ inputs.directory }}/${{ inputs.dockerfile }}
           target: ${{ matrix.target }}
           platforms: linux/${{ matrix.arch }}
-          build-args: VERSION=${{ env.APP_VERSION }}
+          build-args: ${{ steps.args.outputs.args }}
           load: true
           tags: ${{ matrix.name }}:check
           cache-from: type=gha,scope=${{ matrix.name }}-${{ matrix.arch }}
@@ -137,11 +153,11 @@ jobs:
         if: env.TAG != ''
         uses: docker/build-push-action@v6
         with:
-          context: ${{ github.workspace }}/source
-          file: ${{ github.workspace }}/source/${{ inputs.dockerfile }}
+          context: ${{ github.workspace }}/source/${{ inputs.directory }}
+          file: ${{ github.workspace }}/source/${{ inputs.directory }}/${{ inputs.dockerfile }}
           target: ${{ matrix.target }}
           platforms: linux/${{ matrix.arch }}
-          build-args: VERSION=${{ env.APP_VERSION }}
+          build-args: ${{ steps.args.outputs.args }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ inputs.repository || github.repository }}
             org.opencontainers.image.version=${{ env.APP_VERSION }}

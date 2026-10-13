@@ -1,0 +1,97 @@
+# The sample on Apple's platforms, the contract every repository's
+# Makefile.apple follows (what gnustep-release-actions runs):
+#
+#   make -f Makefile.apple                        build (macOS)
+#   make -f Makefile.apple check                  test
+#   make -f Makefile.apple install DESTDIR=...    SampleApp.app, SampleKit.xcframework
+#   make -f Makefile.apple installcheck DESTDIR=...   run what was installed
+#   make -f Makefile.apple ios | ios-check | ios-install DESTDIR=...
+#
+# What it builds on is in .deps/ (Sparkle.xcframework), fetched by the
+# versions in .github/pins.env. No Xcode project: clang, and xcodebuild only
+# to make the XCFramework.
+SPARKLE   := .deps/Sparkle.xcframework/macos-arm64_x86_64
+B         := build
+CFLAGS    := -fobjc-arc -fmodules -O2 -ISampleKit
+VERSION   := 1.0
+MAC       := -isysroot $(shell xcrun --sdk macosx --show-sdk-path) -mmacosx-version-min=12.0
+DEVICE    := -isysroot $(shell xcrun --sdk iphoneos --show-sdk-path) -miphoneos-version-min=15.0
+SIMULATOR := -isysroot $(shell xcrun --sdk iphonesimulator --show-sdk-path) -mios-simulator-version-min=15.0
+
+.PHONY: all check install installcheck ios ios-check ios-install clean
+all: $(B)/SampleApp.app $(B)/SampleKit.xcframework
+
+# SampleKit, a static library for each platform, then one XCFramework.
+$(B)/%/libSampleKit.a: SampleKit/SKGreeting.m SampleKit/SKGreeting.h
+	mkdir -p $(@D)
+	xcrun clang $(CFLAGS) $(FLAGS_$*) -c SampleKit/SKGreeting.m -o $(@D)/SKGreeting.o
+	xcrun libtool -static -o $@ $(@D)/SKGreeting.o
+FLAGS_macos     = -arch arm64 -arch x86_64 $(MAC)
+FLAGS_device    = -arch arm64 $(DEVICE)
+FLAGS_simulator = -arch arm64 -arch x86_64 $(SIMULATOR)
+
+$(B)/SampleKit.xcframework: $(B)/macos/libSampleKit.a $(B)/device/libSampleKit.a $(B)/simulator/libSampleKit.a
+	rm -rf $@ $(B)/headers && mkdir -p $(B)/headers/SampleKit && cp SampleKit/SKGreeting.h $(B)/headers/SampleKit/
+	xcodebuild -create-xcframework \
+	  -library $(B)/macos/libSampleKit.a -headers $(B)/headers \
+	  -library $(B)/device/libSampleKit.a -headers $(B)/headers \
+	  -library $(B)/simulator/libSampleKit.a -headers $(B)/headers \
+	  -output $@
+
+# The Mac app: universal, Sparkle embedded and linked.
+$(B)/SampleApp.app: SampleApp/main.m $(B)/macos/libSampleKit.a
+	@test -d $(SPARKLE)/Sparkle.framework || { echo "no $(SPARKLE): fetch .deps (gnustep-release-actions' scripts/deps.sh apple)"; exit 1; }
+	rm -rf $@ && mkdir -p $@/Contents/MacOS $@/Contents/Frameworks
+	xcrun clang $(CFLAGS) $(FLAGS_macos) -F$(SPARKLE) SampleApp/main.m $(B)/macos/libSampleKit.a \
+	  -framework AppKit -framework Sparkle -Wl,-rpath,@executable_path/../Frameworks -o $@/Contents/MacOS/SampleApp
+	cp -R $(SPARKLE)/Sparkle.framework $@/Contents/Frameworks/
+	plutil -create xml1 $@/Contents/Info.plist
+	plutil -insert CFBundleExecutable -string SampleApp $@/Contents/Info.plist
+	plutil -insert CFBundleIdentifier -string io.github.ashalkhakov.sample $@/Contents/Info.plist
+	plutil -insert CFBundleName -string SampleApp $@/Contents/Info.plist
+	plutil -insert CFBundlePackageType -string APPL $@/Contents/Info.plist
+	plutil -insert CFBundleShortVersionString -string $(VERSION) $@/Contents/Info.plist
+	plutil -insert CFBundleVersion -string 1 $@/Contents/Info.plist
+	plutil -insert LSMinimumSystemVersion -string 12.0 $@/Contents/Info.plist
+	plutil -insert NSPrincipalClass -string NSApplication $@/Contents/Info.plist
+	codesign --force --deep -s - $@
+
+check: $(B)/macos/libSampleKit.a
+	xcrun clang $(CFLAGS) $(MAC) Tests/check.m $(B)/macos/libSampleKit.a -framework Foundation -o $(B)/check
+	$(B)/check
+
+install: all
+	mkdir -p $(DESTDIR)
+	rm -rf $(DESTDIR)/SampleApp.app $(DESTDIR)/SampleKit.xcframework
+	cp -R $(B)/SampleApp.app $(B)/SampleKit.xcframework $(DESTDIR)/
+
+installcheck:
+	$(DESTDIR)/SampleApp.app/Contents/MacOS/SampleApp --self-test
+
+# iOS: the app for a device (unsigned) and for the simulator.
+$(B)/%/SampleApp.app: SampleApp/ios.m $(B)/%/libSampleKit.a
+	rm -rf $@ && mkdir -p $@
+	xcrun clang $(CFLAGS) $(FLAGS_$*) SampleApp/ios.m $(B)/$*/libSampleKit.a -framework UIKit -o $@/SampleApp
+	plutil -create xml1 $@/Info.plist
+	plutil -insert CFBundleExecutable -string SampleApp $@/Info.plist
+	plutil -insert CFBundleIdentifier -string io.github.ashalkhakov.sample $@/Info.plist
+	plutil -insert CFBundleName -string SampleApp $@/Info.plist
+	plutil -insert CFBundlePackageType -string APPL $@/Info.plist
+	plutil -insert CFBundleShortVersionString -string $(VERSION) $@/Info.plist
+	plutil -insert CFBundleVersion -string 1 $@/Info.plist
+	plutil -insert MinimumOSVersion -string 15.0 $@/Info.plist
+	codesign --force -s - $@
+
+ios: $(B)/device/SampleApp.app $(B)/simulator/SampleApp.app
+
+ios-check: $(B)/simulator/libSampleKit.a
+	@echo "ios-check: the library builds for iOS (its test runs on macOS)"
+
+ios-install: ios
+	mkdir -p $(DESTDIR)/iphoneos $(DESTDIR)/iphonesimulator
+	rm -rf $(DESTDIR)/iphoneos/SampleApp.app $(DESTDIR)/iphonesimulator/SampleApp.app
+	cp -R $(B)/device/SampleApp.app $(DESTDIR)/iphoneos/
+	cp -R $(B)/simulator/SampleApp.app $(DESTDIR)/iphonesimulator/
+
+clean:
+	rm -rf $(B)

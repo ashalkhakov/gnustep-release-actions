@@ -3,9 +3,9 @@
 The build, test and release steps that are the same in every app built on
 the patched GNUstep stack and on macOS: TopoText's SimpleNotes, ODataKit's
 Workbench, FreeCoreData's ModelBuilder, HomeRow, XFormsKit, UDCalc,
-UDQuakeTools. Each repository
-keeps its own build; everything around it is here, once, and a fix made
-here reaches every repository when it moves to the new version.
+UDQuakeTools, and the libraries they build on (FreeCoreData, ODataKit).
+Each repository keeps its own build, in its makefiles; everything around it
+is here, once, and a fix made here reaches every repository at once.
 
 | Action | What it does |
 |---|---|
@@ -14,24 +14,55 @@ here reaches every repository when it moves to the new version.
 | [`sparkle-appcast`](sparkle-appcast/action.yml) | A release's Sparkle appcast, signed with the EdDSA key |
 | [`appimage-update-info`](appimage-update-info/action.yml) | A release's AppImage update information, so the image updates itself from the newest release |
 | [`appimage`](appimage/action.yml) | A GNUstep app's AppImage from its `appimage.conf`: the runtime, theme, fonts, opener and the shared launcher ([`AppRun`](appimage/AppRun)), the same in every app's image |
-| [`appimage-test`](appimage-test/action.yml) | Runs the repository's `linux-test.sh` against an AppImage on a clean Ubuntu (no GNUstep, no fonts), in a container |
+| [`appimage-test`](appimage-test/action.yml) | The AppImage's smoke test (`SMOKE` or `SMOKE_SCRIPT` in its `appimage.conf`) on a clean Ubuntu (no GNUstep, no fonts), in a container |
 | [`appimage-tools`](appimage-tools/action.yml) | linuxdeploy (pinned) and the AppImage runtime |
-| [`gnustep-stack`](gnustep-stack/action.yml) | The patched GNUstep stack, from the image gnustep-patches publishes (`ghcr.io/ashalkhakov/gnustep`, the newest), with the packages building on it needs |
-| [`pins`](pins/action.yml) | Loads the repository's pins (`.github/pins.env`) into the job's environment |
 
 Each says what it takes and what it gives in its `action.yml`. They are the
 pieces the workflows are made of, used from the workflows' own checkout; a
 repository calls the workflows, not these.
 
-## A repository's workflow: one, the same everywhere
+## A repository: built, tested and installed the familiar way
 
-A repository has one workflow, `.github/workflows/build.yml`, that builds,
-tests and packages every push, and releases a tag. It runs on pushes, not on
-pull requests too: a push to a branch already shows its checks on the
-branch's pull request, and both would run every commit twice. It calls
-the workflows here (macOS, the AppImage, and iOS where it has an iOS app),
-which hold the whole of each job, and gives them names; nothing else in it is
-its own:
+Every repository, a library or an application, is built the same way, by
+its own makefiles; the workflows here only call them, and package what they
+install:
+
+| | Linux: `GNUmakefile` | macOS: `Makefile.apple` |
+|---|---|---|
+| build | `make` | `make -f Makefile.apple` |
+| test | `make check` | `make -f Makefile.apple check` |
+| install | `make install DESTDIR=<dir>` | `make -f Makefile.apple install DESTDIR=<dir>` |
+| test what was installed (optional) | | `make -f Makefile.apple installcheck DESTDIR=<dir>` |
+| iOS (where it has an iOS app) | | `ios`, `ios-check`, `ios-install DESTDIR=<dir>`, `ios-installcheck` |
+
+`install` puts into `DESTDIR`:
+- on Linux, what the repository installs into the GNUstep prefix
+  (`DESTDIR/opt/gnustep/...`, gnustep-make's own `DESTDIR`);
+- on macOS, each app by its bundle name (`DESTDIR/SimpleNotes.app`), and a
+  library's XCFrameworks (`DESTDIR/ODataKit.xcframework`);
+- for iOS, each app in `DESTDIR/iphoneos` and `DESTDIR/iphonesimulator`.
+
+[`test/sample`](test/sample) is the smallest repository that does all of it,
+and what this repository's own test builds.
+
+### What it builds on: `.github/pins.env`, exact versions
+
+```sh
+GNUSTEP_PATCHES_VERSION=2026.10.13   # the GNUstep stack (gnustep-patches' release)
+FREECOREDATA_VERSION=0.5.0           # our libraries, each a release
+SPARKLE_VERSION=2.10.0               # Sparkle (Apple)
+```
+
+Each `<NAME>_VERSION` is a release of `ashalkhakov/<name>` (the name in
+capitals, `-` as `_`), fetched by [`scripts/deps.sh`](scripts/deps.sh): on
+Linux its `<name>-<version>-ubuntu22.04-<arch>.tar.xz`, unpacked into
+`/opt/gnustep`, the stack first; on Apple its `<name>-<version>-apple.zip`
+(its XCFrameworks), and Sparkle's, unpacked into `.deps/`, where the Xcode
+projects find them. On your own machine, the same script does the same
+(`scripts/deps.sh linux` or `apple`, from the repository's root). A library
+publishes exactly those files for each of its releases.
+
+### `.github/workflows/build.yml`: names only
 
 ```yaml
 name: Build
@@ -50,59 +81,43 @@ concurrency:
 permissions:
   contents: write
 jobs:
+  linux:
+    uses: ashalkhakov/gnustep-release-actions/.github/workflows/linux.yml@v1
+    with:
+      tag: ${{ inputs.tag }}
+      library: true                          # a library: publish its archives (x86_64, aarch64)
+      extra-packages: libsqlite3-dev libpq-dev
+      databases: postgres mysql mariadb      # for make check: POSTGRES_URL, ...
   macos:
-    uses: ashalkhakov/gnustep-release-actions/.github/workflows/macos-release.yml@v1
+    uses: ashalkhakov/gnustep-release-actions/.github/workflows/macos.yml@v1
     with:
       tag: ${{ inputs.tag }}
-      apps: SimpleNotes=SimpleNotes          # Name=Bundle, space-separated
-      dependencies: ODataKit                 # checked out beside it, at its pin
+      apps: SimpleNotes=SimpleNotes          # an app: Name=Bundle, space-separated
+      library: true                          # a library: publish its XCFrameworks
     secrets: inherit
-  appimage:
-    uses: ashalkhakov/gnustep-release-actions/.github/workflows/appimage-release.yml@v1
-    with:
-      tag: ${{ inputs.tag }}
-      dependencies: FreeCoreData ODataKit
-      extra-packages: libsqlite3-dev libpq-dev libmariadb-dev
 ```
 
-Every run is the same three steps:
+It runs on pushes, not on pull requests too: a push to a branch already shows
+its checks on the branch's pull request. Every run builds, tests, installs and
+uploads; without a tag, unsigned, kept two weeks. A `v*` tag (pushed, or given
+to a run started by hand) also releases: the Mac apps signed, checked again
+signed, notarized, their Sparkle appcasts written; the AppImage with its
+update information; a library's archives and XCFrameworks; all attached to
+the tag's release (a pre-release when the tag has a `-`).
 
-1. **Build**, by the repository's build hook: the app, and its unit tests.
-2. **Test**, by its test hook: the built app, or the AppImage on a clean
-   Ubuntu with no GNUstep and no fonts.
-3. **Release**: without a tag, the artifacts, uploaded to the run, unsigned;
-   for a `v*` tag (pushed, or given to a run started by hand), the Mac apps
-   signed, tested again signed, notarized, their Sparkle appcasts written, the
-   AppImage with its update information, all attached to the tag's release (a
-   pre-release when the tag has a `-`).
+The workflows write the version first ([`scripts/stamp-version.sh`](scripts/stamp-version.sh)),
+by key, into every Xcode project, `.xcconfig`, Info.plist and app GNUmakefile,
+so a repository keeps no stamping of its own: `APP_VERSION` (`1.2.3`, or
+`0.0.0-build<n>`) and `BUILD_NUMBER` (CFBundleVersion, which Sparkle
+compares). `databases:` starts PostgreSQL, MySQL and MariaDB for `make
+check`, and hands it `POSTGRES_URL`, `MYSQL_URL`, `MARIADB_URL`
+([`scripts/databases.sh`](scripts/databases.sh)); `CI` is set, so a test that
+was not given its service fails rather than skips.
 
-What differs between apps lives in hooks, scripts at fixed paths, run from
-the repository's root:
-
-| Hook | Does |
-|---|---|
-| `.github/release/macos-build.sh` | Builds and runs the unit tests; leaves each app, by bundle name, in `$RELEASE_DIR` |
-| `.github/release/macos-test.sh <app>` | Tests an app; for a tag, again once signed (optional) |
-| `.github/release/linux-build.sh` | Builds the dependencies and the app on the stack in `$PREFIX`, and runs the unit tests (optional) |
-| (input `databases`) | PostgreSQL, MySQL and MariaDB for the Linux tests, started for the hooks: `POSTGRES_URL`, `MYSQL_URL`, `MARIADB_URL` and their `*_CONTAINER` ([`scripts/databases.sh`](scripts/databases.sh)) |
-| `.github/release/linux-install.sh` | Installs its apps and tools into `$PREFIX` (`GNUSTEP_INSTALLATION_DOMAIN=SYSTEM`), where the image takes them from |
-| `.github/release/appimage.conf` | What the AppImage carries and starts (below) |
-| `.github/release/linux-test.sh <image>` | Exercises the AppImage, in a clean Ubuntu 22.04 container (optional) |
-| `.github/release/ios-build.sh` | Builds the iOS app(s) into `$RELEASE_DIR/iphoneos` and `$RELEASE_DIR/iphonesimulator` |
-| `.github/release/ios-test.sh <app>` | Tests a simulator build (optional) |
-
-The workflows write the version before the build hooks run
-([`scripts/stamp-version.sh`](scripts/stamp-version.sh)), by key, into every
-Xcode project, `.xcconfig`, Info.plist and app GNUmakefile the repository
-has, so a hook passes no version to its build and a repository keeps no
-stamping script. The hooks see `TAG`, `APP_VERSION` (`1.2.3`, or
-`0.0.0-build<n>` without a tag), `BUILD_NUMBER` (the run's; CFBundleVersion,
-which Sparkle compares), `RELEASE_DIR`, `PREFIX` (Linux) and the repository's
-pins. The workflows do the rest the same way for everyone: checkout, pins and
-dependencies, a universal binary and Sparkle checked, zips named
-`<Name>-macOS-<version>.zip`, appcasts (`appcast.xml`, or
-`appcast-<Name>.xml` for several apps), the GNUstep stack, the AppImage, and
-the uploads.
+An application with an AppImage has `.github/release/appimage.conf` (below);
+one with Docker images, `docker.yml` and, optionally,
+`.github/release/docker-test.sh <target> <image>`, which exercises an image
+it is given.
 
 ## The AppImage: one launcher, one packager
 
@@ -137,7 +152,7 @@ services) adds one more job to its `build.yml`:
 
 ```yaml
   docker:
-    uses: ashalkhakov/gnustep-release-actions/.github/workflows/docker-release.yml@v1
+    uses: ashalkhakov/gnustep-release-actions/.github/workflows/docker.yml@v1
     with:
       tag: ${{ inputs.tag }}
       dockerfile: Docker/server.Dockerfile
@@ -152,35 +167,21 @@ Each image is built for amd64 and arm64 on runners of their own, with the
 version stamped first, and checked by `.github/release/docker-test.sh
 <target> <image>` when the repository has one; a tag pushes them to
 `ghcr.io/<owner>/<name>:<version>` (and `:latest` for a release that is not a
-pre-release). The Dockerfiles build on the stack's image, `FROM
-ghcr.io/ashalkhakov/gnustep:latest`, rather than building GNUstep.
+pre-release). The Dockerfiles take what they build on as CI does: the
+stack's and the libraries' archives, by the versions in `.github/pins.env`,
+which arrive as build arguments of the same names (`GNUSTEP_PATCHES_VERSION`,
+...), with `VERSION`, the version being built.
 
 ## GNUstep: one stack, gnustep-patches'
 
-Every app builds on the same patched GNUstep: the stack gnustep-patches
-publishes, versioned by its own tags (the date, `v2026.10.13`), as
-`ghcr.io/ashalkhakov/gnustep:<version>` and `:latest`, on Ubuntu 22.04 (the
-oldest LTS in support, so an AppImage built on it runs on anything newer),
-with every component any app uses. The Linux job takes the newest; its log
-says which (the stack's VERSION and MANIFEST, the commit of each component).
-A fix to GNUstep reaches every app as one new stack, released in one place.
-
-## Pins: one place per repository
-
-Every commit of ours a repository builds on (FreeCoreData, ODataKit, ...)
-is named once, in `.github/pins.env`:
-
-```sh
-# What this repository builds on; moved here and nowhere else.
-FREECOREDATA_REF=5bfd5a87179cff43e0a8a55622fc00f01951c88a
-ODATAKIT_REF=de46fce6bd0bd1c7f2c7a5a59a1fcae0e5a9f5c8
-```
-
-The workflows load it right after checking the repository out, check each
-dependency out beside it at its pin (`<NAME>_REF`: ODataKit's is
-`ODATAKIT_REF`), and give the pins to the hooks; a script reads the same file
-for its defaults (`. .github/pins.env`). A pin is a full commit hash: a
-branch or a short hash is refused.
+Every repository builds on the same patched GNUstep: the stack gnustep-patches
+publishes for each of its releases (the date, `v2026.10.13`), an archive of
+`/opt/gnustep` on Ubuntu 22.04 (the oldest LTS in support, so an AppImage
+built on it runs on anything newer), for x86_64 and aarch64, with every
+component any repository uses, and in `/opt/gnustep/share/gnustep-patches`
+what it is: its VERSION, MANIFEST (the commit of each component) and the
+packages building on it needs. A fix to GNUstep reaches a repository when its
+`GNUSTEP_PATCHES_VERSION` moves to the release that carries it.
 
 ## In the app
 
@@ -202,10 +203,9 @@ The workflows check this repository out at their own commit
 (`job.workflow_sha`) and take every script and action from there, whatever
 ref the caller named: a branch here is tested as a whole, and `v1` is exactly
 what `v1` holds. [`test.yml`](.github/workflows/test.yml) runs them on every
-pull request against real apps at pinned commits (UDCalc for macOS and the
-AppImage, TopoText for iOS), with no tag: nothing signed, nothing released.
-Move those pins when an app's hooks change. A merge is released by tagging it
-`v1.<n>.0` and moving `v1` to it.
+pull request on [`test/sample`](test/sample), with no tag: nothing signed,
+nothing released. A merge is released by tagging it `v1.<n>.0` and moving
+`v1` to it.
 
 ## License
 

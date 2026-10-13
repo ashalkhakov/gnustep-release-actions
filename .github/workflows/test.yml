@@ -1,22 +1,11 @@
 name: Test
 
-# The workflows and actions here, tested as they are in this commit, on real
-# apps, before any app uses them: a change is proven in its own pull request,
-# with nothing in an app pointed at a branch. Each app is built at a pinned
-# commit (its hooks, appimage.conf and pins.env as of then), without a tag:
-# built, tested, packaged and uploaded, nothing signed or released.
-#
-#   UDCalc     macos-release.yml and appimage-release.yml: the smallest app
-#              with both, its Xcode build, Sparkle, the GNUstep stack, the
-#              AppImage and its smoke test on a clean Ubuntu
-#   TopoText   ios-release.yml: SimpleNotes for iOS, with ODataKit beside it,
-#              and its self-test in a simulator against its server; and
-#              docker-release.yml: its server's image, built on the stack
-#              image and checked on SQLite, PostgreSQL and an identity provider;
-#              and appimage-release.yml with databases: its server's tests on
-#              PostgreSQL and MariaDB
-#
-# Move a pin to an app's newer commit when its hooks change.
+# The workflows and actions here, tested as they are in this commit, on the
+# sample in test/sample: the smallest repository with everything they handle
+# (a library and an application on it, for Linux, macOS and iOS, an
+# AppImage and an image), built, tested, installed and packaged, without a
+# tag: nothing signed or released. A change is proven in its own pull
+# request, before any repository uses it.
 on:
   push:
     branches: [main]
@@ -31,41 +20,29 @@ permissions:
   contents: read
 
 jobs:
+  linux:
+    uses: ./.github/workflows/linux.yml
+    with:
+      directory: test/sample
+      library: true
+
   macos:
-    uses: ./.github/workflows/macos-release.yml
+    uses: ./.github/workflows/macos.yml
     with:
-      repository: ashalkhakov/UDCalc
-      ref: aa7c9a5577d06a14d36c076857f0cc40dd2419fa
-      apps: UDCalc=Calculator
-
-  appimage:
-    uses: ./.github/workflows/appimage-release.yml
-    with:
-      repository: ashalkhakov/UDCalc
-      ref: aa7c9a5577d06a14d36c076857f0cc40dd2419fa
-
-  appimage-databases:
-    uses: ./.github/workflows/appimage-release.yml
-    with:
-      repository: ashalkhakov/TopoText
-      ref: 993131b206a719d8ee9f272553794553a03c4f5a
-      dependencies: FreeCoreData ODataKit
-      extra-packages: libsqlite3-dev libpq-dev libmariadb-dev
-      databases: postgres mariadb
+      directory: test/sample
+      library: true
+      apps: Sample=SampleApp
 
   ios:
-    uses: ./.github/workflows/ios-release.yml
+    uses: ./.github/workflows/ios.yml
     with:
-      repository: ashalkhakov/TopoText
-      ref: 993131b206a719d8ee9f272553794553a03c4f5a
-      apps: SimpleNotes-iOS=SimpleNotes
-      dependencies: ODataKit
+      directory: test/sample
+      apps: Sample-iOS=SampleApp
 
   docker:
-    uses: ./.github/workflows/docker-release.yml
+    uses: ./.github/workflows/docker.yml
     with:
-      repository: ashalkhakov/TopoText
-      ref: 993131b206a719d8ee9f272553794553a03c4f5a
-      dockerfile: Docker/server.Dockerfile
-      images: =simplenotes-server
-      description: test
+      directory: test/sample
+      dockerfile: Dockerfile
+      images: =gnustep-release-actions-sample
+      description: gnustep-release-actions' sample

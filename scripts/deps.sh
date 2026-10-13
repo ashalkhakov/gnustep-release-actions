@@ -1,0 +1,65 @@
+#!/bin/bash
+# What a repository builds on, fetched by the exact versions its
+# .github/pins.env names, from those releases:
+#
+#   GNUSTEP_PATCHES_VERSION=2026.10.13   ashalkhakov/gnustep-patches, tag v2026.10.13
+#   FREECOREDATA_VERSION=0.5.0           ashalkhakov/freecoredata, tag v0.5.0
+#   SPARKLE_VERSION=2.10.0               sparkle-project/Sparkle, tag 2.10.0 (Apple)
+#
+#   deps.sh linux   each one's <name>-<version>-ubuntu22.04-<arch>.tar.xz, unpacked
+#                   at / (they hold opt/gnustep), the stack first
+#   deps.sh apple   each one's <name>-<version>-apple.zip (its XCFrameworks), and
+#                   Sparkle's, unpacked into .deps/ in the repository's root
+#
+# <NAME> is the repository's name in capitals, '-' as '_'. Run from the
+# repository's root; a repository with no pins.env builds on nothing of ours.
+set -euo pipefail
+platform=${1:?usage: deps.sh linux|apple}
+pins=.github/pins.env
+[ -f "$pins" ] || { echo "no $pins: nothing to fetch"; exit 0; }
+
+# NAME=version, the stack's first, in the order the file gives the rest.
+entries=$(sed -n 's/^\([A-Z0-9_]*\)_VERSION=\(.*\)$/\1 \2/p' "$pins" \
+          | awk '$1 == "GNUSTEP_PATCHES" { print; next } { rest = rest $0 "\n" } END { printf "%s", rest }')
+[ -n "$entries" ] || { echo "$pins names no *_VERSION: nothing to fetch"; exit 0; }
+
+fetch() {  # fetch <url> <file>
+  for i in 1 2 3; do curl -fsSL -o "$2" "$1" && return 0; sleep 5; done
+  echo "::error::could not fetch $1"; return 1
+}
+
+work=$(mktemp -d)
+arch=$(uname -m)
+while read -r name version; do
+  [ -n "$name" ] || continue
+  repo=$(echo "$name" | tr 'A-Z_' 'a-z-')
+  case "$platform:$name" in
+    linux:SPARKLE) continue ;;
+    apple:GNUSTEP_PATCHES) continue ;;
+    apple:SPARKLE)
+      # The XCFramework is in the zip Sparkle publishes for SwiftPM; it is
+      # unpacked here like any other, no SwiftPM involved.
+      fetch "https://github.com/sparkle-project/Sparkle/releases/download/$version/Sparkle-for-Swift-Package-Manager.zip" "$work/sparkle.zip"
+      mkdir -p .deps "$work/sparkle"
+      ditto -x -k "$work/sparkle.zip" "$work/sparkle"
+      rm -rf .deps/Sparkle.xcframework
+      cp -R "$work/sparkle/Sparkle.xcframework" .deps/
+      echo "Sparkle $version: .deps/Sparkle.xcframework"
+      ;;
+    linux:*)
+      file=$repo-$version-ubuntu22.04-$arch.tar.xz
+      fetch "https://github.com/ashalkhakov/$repo/releases/download/v$version/$file" "$work/$file"
+      sudo mkdir -p /opt/gnustep && sudo chown "$(id -u):$(id -g)" /opt/gnustep
+      tar -C / -xJf "$work/$file"
+      echo "$repo $version: $(tar -tJf "$work/$file" | wc -l) files into /opt/gnustep"
+      ;;
+    apple:*)
+      file=$repo-$version-apple.zip
+      fetch "https://github.com/ashalkhakov/$repo/releases/download/v$version/$file" "$work/$file"
+      mkdir -p .deps
+      ditto -x -k "$work/$file" .deps/
+      echo "$repo $version: $(cd .deps && ls -d *.xcframework | tr '\n' ' ')"
+      ;;
+  esac
+done <<< "$entries"
+rm -rf "$work"
