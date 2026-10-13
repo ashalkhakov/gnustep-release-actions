@@ -21,7 +21,7 @@ Each says what it takes and what it gives in its `action.yml`.
 ## A repository's release: the same everywhere
 
 A repository does not assemble its release from these actions: it calls the
-two release workflows, which hold the whole of each job, and gives them
+release workflows (macOS, the AppImage, and iOS where it has an iOS app), which hold the whole of each job, and gives them
 names. Its `.github/workflows/release.yml` is this, with only the names its
 own:
 
@@ -64,6 +64,8 @@ the repository's root:
 | `.github/release/linux-build.sh` | Builds the dependencies and the app on the stack in `$PREFIX` |
 | `.github/release/linux-package.sh` | Makes `<appimage>-<version>-x86_64.AppImage` in the root, with `$LINUXDEPLOY` |
 | `.github/release/linux-test.sh <image>` | Exercises the AppImage, in a clean Ubuntu 22.04 container (optional) |
+| `.github/release/ios-build.sh` | Builds the iOS app(s) into `$RELEASE_DIR/iphoneos` and `$RELEASE_DIR/iphonesimulator` (`ios-release.yml`) |
+| `.github/release/ios-test.sh <app>` | Tests a simulator build (optional) |
 
 They see `TAG`, `APP_VERSION` (`1.2.3`, or `0.0.0-build<n>` without a tag),
 `BUILD_NUMBER` (the run's; CFBundleVersion, which Sparkle compares) and the
