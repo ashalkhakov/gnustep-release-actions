@@ -13,6 +13,7 @@ here reaches every repository when it moves to the new version.
 | [`sparkle-appcast`](sparkle-appcast/action.yml) | A release's Sparkle appcast, signed with the EdDSA key |
 | [`appimage-update-info`](appimage-update-info/action.yml) | A release's AppImage update information, so the image updates itself from the newest release |
 | [`appimage`](appimage/action.yml) | A GNUstep app's AppImage from its `appimage.conf`: the runtime, theme, fonts, opener and the shared launcher ([`AppRun`](appimage/AppRun)), the same in every app's image |
+| [`appimage-test`](appimage-test/action.yml) | Runs the repository's `linux-test.sh` against an AppImage on a clean Ubuntu (no GNUstep, no fonts), in a container |
 | [`appimage-tools`](appimage-tools/action.yml) | linuxdeploy (pinned) and the AppImage runtime |
 | [`gnustep-stack`](gnustep-stack/action.yml) | The patched GNUstep stack (gnustep-patches' `build-gnustep.sh`), cached by its recipe |
 | [`pins`](pins/action.yml) | Loads the repository's pins (`.github/pins.env`) into the job's environment |
@@ -61,7 +62,9 @@ the repository's root:
 |---|---|
 | `.github/release/macos-build.sh` | Builds; leaves each app, by bundle name, in `$RELEASE_DIR` |
 | `.github/release/macos-test.sh <app>` | Tests an app, before signing and again once signed (optional) |
-| `.github/release/linux-build.sh` | Builds the dependencies and the app on the stack in `$PREFIX`, and installs its apps and tools there (`GNUSTEP_INSTALLATION_DOMAIN=SYSTEM`) |
+| `.github/release/linux-build.sh` | Builds the dependencies and the app on the stack in `$PREFIX` |
+| `.github/release/linux-install.sh` | Installs its apps and tools into `$PREFIX` (`GNUSTEP_INSTALLATION_DOMAIN=SYSTEM`), where the image takes them from; run by the `appimage` action |
+| `.github/release/appimage.conf` | What the AppImage carries and starts (below) |
 | `.github/release/linux-test.sh <image>` | Exercises the AppImage, in a clean Ubuntu 22.04 container (optional) |
 | `.github/release/ios-build.sh` | Builds the iOS app(s) into `$RELEASE_DIR/iphoneos` and `$RELEASE_DIR/iphonesimulator` (`ios-release.yml`) |
 | `.github/release/ios-test.sh <app>` | Tests a simulator build (optional) |
@@ -97,12 +100,14 @@ REQUIRE="SimpleNotes.momd"                # must be in the image
 
 [`appimage.sh`](appimage/appimage.sh) lists every name and what it does
 (`WITH_ARGUMENTS`, `WITH_FILE` and `FIXED_PITCH_FONT` too). The release
-workflow and a repository's CI make the image the same way, after the build
-has installed the app into the prefix:
+workflow and a repository's CI make and test the image the same way, after
+their build:
 
 ```yaml
-- run: ./.github/release/linux-build.sh
-- uses: ashalkhakov/gnustep-release-actions/appimage@v1
+- id: appimage
+  uses: ashalkhakov/gnustep-release-actions/appimage@v1     # runs linux-install.sh first
+- uses: ashalkhakov/gnustep-release-actions/appimage-test@v1
+  with: { image: ${{ steps.appimage.outputs.image }} }
 ```
 
 The image's launcher gives every app the Eau theme, the fonts it carries
