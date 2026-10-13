@@ -26,7 +26,9 @@ repository calls the workflows, not these.
 ## A repository's workflow: one, the same everywhere
 
 A repository has one workflow, `.github/workflows/build.yml`, that builds,
-tests and packages every push and pull request, and releases a tag. It calls
+tests and packages every push, and releases a tag. It runs on pushes, not on
+pull requests too: a push to a branch already shows its checks on the
+branch's pull request, and both would run every commit twice. It calls
 the workflows here (macOS, the AppImage, and iOS where it has an iOS app),
 which hold the whole of each job, and gives them names; nothing else in it is
 its own:
@@ -37,14 +39,13 @@ on:
   push:
     branches: ['**']
     tags: ['v*']
-  pull_request:
   workflow_dispatch:
     inputs:
       tag:
         description: 'A v* tag to build and release (empty: this branch, as artifacts)'
         default: ''
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  group: ${{ github.workflow }}-${{ github.ref_name }}
   cancel-in-progress: ${{ github.ref_type != 'tag' }}
 permissions:
   contents: write
