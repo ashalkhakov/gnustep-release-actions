@@ -14,6 +14,7 @@ here reaches every repository when it moves to the new version.
 | [`appimage-update-info`](appimage-update-info/action.yml) | A release's AppImage update information, so the image updates itself from the newest release |
 | [`appimage-tools`](appimage-tools/action.yml) | linuxdeploy (pinned) and the AppImage runtime |
 | [`gnustep-stack`](gnustep-stack/action.yml) | The patched GNUstep stack (gnustep-patches' `build-gnustep.sh`), cached by its recipe |
+| [`pins`](pins/action.yml) | Loads the repository's pins (`.github/pins.env`) into the job's environment |
 
 Each says what it takes and what it gives in its `action.yml`.
 
@@ -60,6 +61,34 @@ Pinned to a major version; `v1` moves with fixes that change no input.
 
 The release then attaches the zip, `appcast.xml`, the AppImage and its
 `.zsync`.
+
+## Pins: one place per repository
+
+Every commit a repository builds on (gnustep-patches, FreeCoreData,
+ODataKit, ...) is named once, in `.github/pins.env`:
+
+```sh
+# What this repository builds on; moved here and nowhere else.
+GNUSTEP_PATCHES_REF=dcbad8f6db6db7054bc9152aad3e8686a233809d
+FREECOREDATA_REF=5bfd5a87179cff43e0a8a55622fc00f01951c88a
+```
+
+Each workflow job loads it right after checking the repository out, and
+uses the names from there on (`ref: ${{ env.GNUSTEP_PATCHES_REF }}`); a
+script reads the same file for its defaults (`. .github/pins.env`). A pin is
+a full commit hash: the action refuses a branch or a short hash.
+
+```yaml
+- uses: actions/checkout@v4
+  with: { path: source }
+- uses: ashalkhakov/gnustep-release-actions/pins@v1
+  with: { file: source/.github/pins.env }
+- uses: actions/checkout@v4
+  with:
+    repository: ashalkhakov/gnustep-patches
+    ref: ${{ env.GNUSTEP_PATCHES_REF }}
+    path: gnustep-patches
+```
 
 ## In the app
 
