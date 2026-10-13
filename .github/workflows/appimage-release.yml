@@ -96,7 +96,7 @@ jobs:
           zsync: ${{ steps.name.outputs.image }}-*x86_64.AppImage.zsync
 
       - name: Package
-        uses: ashalkhakov/gnustep-release-actions/appimage@v1
+        uses: ashalkhakov/gnustep-release-actions/appimage@appimage-shared
         with:
           working-directory: ${{ github.workspace }}/source
 
@@ -115,7 +115,7 @@ jobs:
         run: echo "image=$(ls "$GITHUB_WORKSPACE/out/$APPIMAGE"-*.AppImage)" >> "$GITHUB_OUTPUT"
 
       - name: Smoke test, on a clean Ubuntu 22.04
-        uses: ashalkhakov/gnustep-release-actions/appimage-test@v1
+        uses: ashalkhakov/gnustep-release-actions/appimage-test@appimage-shared
         with:
           image: ${{ steps.image.outputs.image }}
           working-directory: ${{ github.workspace }}/source
