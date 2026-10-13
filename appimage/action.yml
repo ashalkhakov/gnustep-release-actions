@@ -38,6 +38,12 @@ runs:
         VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
+        # What packaging reads (file, desktop-file-validate) and the fonts the
+        # image carries, when the machine lacks them.
+        if ! command -v file > /dev/null || ! command -v desktop-file-validate > /dev/null \
+           || [ ! -d /usr/share/fonts/truetype/liberation ] || [ ! -d /usr/share/fonts/truetype/dejavu ]; then
+          sudo apt-get -q update && sudo apt-get -q -y install file desktop-file-utils fonts-dejavu-core fonts-liberation
+        fi
         # The app's apps and tools into the prefix, where the image takes
         # them from: the repository's own few make lines.
         if [ -x .github/release/linux-install.sh ]; then ./.github/release/linux-install.sh; fi
