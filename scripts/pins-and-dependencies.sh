@@ -3,7 +3,7 @@
 # (source/.github/pins.env, if it has one) into the environment, and each
 # dependency (DEPENDENCIES, space-separated ashalkhakov repositories)
 # checked out beside source/ at its pin: ODataKit at ODATAKIT_REF,
-# gnustep-patches at GNUSTEP_PATCHES_REF.
+# FreeCoreData at FREECOREDATA_REF.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 pins=$GITHUB_WORKSPACE/source/.github/pins.env

@@ -37,13 +37,13 @@ on:
         type: string
         default: ''
       dependencies:
-        description: Space-separated ashalkhakov repositories besides gnustep-patches checked out beside source/ at their pins (FreeCoreData -> FREECOREDATA_REF)
+        description: Space-separated ashalkhakov repositories checked out beside source/ at their pins (FreeCoreData -> FREECOREDATA_REF)
         type: string
         default: ''
-      components:
-        description: What the GNUstep stack is built of
+      stack:
+        description: The GNUstep stack's image (default the newest gnustep-patches published, ghcr.io/ashalkhakov/gnustep:latest)
         type: string
-        default: libobjc2 libdispatch tools-make libs-base libs-gui libs-back eau
+        default: ghcr.io/ashalkhakov/gnustep:latest
       extra-packages:
         description: The app's own build dependencies (apt packages), beyond the stack's
         type: string
@@ -78,7 +78,7 @@ jobs:
 
       - name: Pins and dependencies
         env:
-          DEPENDENCIES: gnustep-patches ${{ inputs.dependencies }}
+          DEPENDENCIES: ${{ inputs.dependencies }}
         run: '"$GITHUB_WORKSPACE/.release-actions/scripts/pins-and-dependencies.sh"'
 
       - name: Version
@@ -93,8 +93,7 @@ jobs:
       - name: GNUstep
         uses: ./.release-actions/gnustep-stack
         with:
-          patches: ${{ github.workspace }}/gnustep-patches
-          components: ${{ inputs.components }}
+          image: ${{ inputs.stack }}
           extra-packages: ${{ inputs.extra-packages }}
 
       - name: Build
@@ -107,6 +106,7 @@ jobs:
           image=$(. .github/release/appimage.conf; echo "${IMAGE:-}")
           [ -n "$image" ] || { echo "::error::.github/release/appimage.conf names no IMAGE"; exit 1; }
           echo "APPIMAGE=$image" >> "$GITHUB_ENV"
+          echo "ARTIFACT=$image-$APP_VERSION-$(uname -m)" >> "$GITHUB_ENV"
           echo "image=$image" >> "$GITHUB_OUTPUT"
 
       - name: Update information
@@ -140,11 +140,15 @@ jobs:
           image: ${{ steps.image.outputs.image }}
           working-directory: ${{ github.workspace }}/source
 
+      # Named for the app and its version, like the files in it; a branch's
+      # is kept two weeks, a tag's as long as artifacts are (its release
+      # keeps the files for good).
       - uses: actions/upload-artifact@v4
         with:
-          name: Linux-${{ github.run_number }}
+          name: ${{ env.ARTIFACT }}
           path: ${{ github.workspace }}/out/*
           if-no-files-found: error
+          retention-days: ${{ env.TAG == '' && 14 || 90 }}
 
       - name: Attach to the release
         if: env.TAG != ''

@@ -76,6 +76,12 @@ jobs:
       - name: Stamp the version
         run: '"$GITHUB_WORKSPACE/.release-actions/scripts/stamp-version.sh"'
 
+      - name: The artifact's name
+        run: |
+          set -- $APPS
+          if [ $# = 1 ]; then name=${1%%=*}; else name=$(basename "${{ inputs.repository || github.repository }}"); fi
+          echo "ARTIFACT=$name-iOS-$APP_VERSION" >> "$GITHUB_ENV"
+
       - name: Build
         run: |
           mkdir -p "$RELEASE_DIR/iphoneos" "$RELEASE_DIR/iphonesimulator"
@@ -87,6 +93,7 @@ jobs:
           done
 
       - name: Test, in a simulator
+        timeout-minutes: 30
         run: |
           [ -x .github/release/ios-test.sh ] || { echo "no .github/release/ios-test.sh"; exit 0; }
           for pair in $APPS; do ./.github/release/ios-test.sh "$RELEASE_DIR/iphonesimulator/${pair#*=}.app"; done
@@ -104,11 +111,24 @@ jobs:
           done
           ls -la "$GITHUB_WORKSPACE/out"
 
+      # Named for the app and its version, like the files in it; a branch's
+      # is kept two weeks, a tag's as long as artifacts are (its release
+      # keeps the files for good).
       - uses: actions/upload-artifact@v4
         with:
-          name: iOS-${{ github.run_number }}
+          name: ${{ env.ARTIFACT }}
           path: ${{ github.workspace }}/out/*
           if-no-files-found: error
+          retention-days: ${{ env.TAG == '' && 14 || 90 }}
+
+      # What Xcode recorded of a failed test, for opening in Xcode.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ${{ env.ARTIFACT }}-test-results
+          path: ${{ runner.temp }}/*.xcresult
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Attach to the release
         if: env.TAG != ''

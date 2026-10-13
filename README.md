@@ -16,7 +16,7 @@ here reaches every repository when it moves to the new version.
 | [`appimage`](appimage/action.yml) | A GNUstep app's AppImage from its `appimage.conf`: the runtime, theme, fonts, opener and the shared launcher ([`AppRun`](appimage/AppRun)), the same in every app's image |
 | [`appimage-test`](appimage-test/action.yml) | Runs the repository's `linux-test.sh` against an AppImage on a clean Ubuntu (no GNUstep, no fonts), in a container |
 | [`appimage-tools`](appimage-tools/action.yml) | linuxdeploy (pinned) and the AppImage runtime |
-| [`gnustep-stack`](gnustep-stack/action.yml) | The patched GNUstep stack (gnustep-patches' `build-gnustep.sh`), cached by its recipe |
+| [`gnustep-stack`](gnustep-stack/action.yml) | The patched GNUstep stack, from the image gnustep-patches publishes (`ghcr.io/ashalkhakov/gnustep`, the newest), with the packages building on it needs |
 | [`pins`](pins/action.yml) | Loads the repository's pins (`.github/pins.env`) into the job's environment |
 
 Each says what it takes and what it gives in its `action.yml`. They are the
@@ -128,15 +128,50 @@ launcher gives every app the Eau theme, the fonts it carries (with a
 fontconfig written at launch), the opener for URLs, Ctrl as Command, and
 `APPIMAGE_GDB=1` to run under gdb.
 
+## Docker images
+
+A repository that publishes images (SimpleNotes' server, ODataKit's SDK and
+services) adds one more job to its `build.yml`:
+
+```yaml
+  docker:
+    uses: ashalkhakov/gnustep-release-actions/.github/workflows/docker-release.yml@v1
+    with:
+      tag: ${{ inputs.tag }}
+      dockerfile: Docker/server.Dockerfile
+      images: =simplenotes-server            # target=name, space-separated
+      description: SimpleNotes' server
+    permissions:
+      contents: read
+      packages: write
+```
+
+Each image is built for amd64 and arm64 on runners of their own, with the
+version stamped first, and checked by `.github/release/docker-test.sh
+<target> <image>` when the repository has one; a tag pushes them to
+`ghcr.io/<owner>/<name>:<version>` (and `:latest` for a release that is not a
+pre-release). The Dockerfiles build on the stack's image, `FROM
+ghcr.io/ashalkhakov/gnustep:latest`, rather than building GNUstep.
+
+## GNUstep: one stack, gnustep-patches'
+
+Every app builds on the same patched GNUstep: the stack gnustep-patches
+publishes, versioned by its own tags (the date, `v2026.10.13`), as
+`ghcr.io/ashalkhakov/gnustep:<version>` and `:latest`, on Ubuntu 22.04 (the
+oldest LTS in support, so an AppImage built on it runs on anything newer),
+with every component any app uses. The Linux job takes the newest; its log
+says which (the stack's VERSION and MANIFEST, the commit of each component).
+A fix to GNUstep reaches every app as one new stack, released in one place.
+
 ## Pins: one place per repository
 
-Every commit a repository builds on (gnustep-patches, FreeCoreData,
-ODataKit, ...) is named once, in `.github/pins.env`:
+Every commit of ours a repository builds on (FreeCoreData, ODataKit, ...)
+is named once, in `.github/pins.env`:
 
 ```sh
 # What this repository builds on; moved here and nowhere else.
-GNUSTEP_PATCHES_REF=dcbad8f6db6db7054bc9152aad3e8686a233809d
 FREECOREDATA_REF=5bfd5a87179cff43e0a8a55622fc00f01951c88a
+ODATAKIT_REF=de46fce6bd0bd1c7f2c7a5a59a1fcae0e5a9f5c8
 ```
 
 The workflows load it right after checking the repository out, check each

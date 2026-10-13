@@ -90,6 +90,12 @@ jobs:
       - name: Stamp the version
         run: '"$GITHUB_WORKSPACE/.release-actions/scripts/stamp-version.sh"'
 
+      - name: The artifact's name
+        run: |
+          set -- $APPS
+          if [ $# = 1 ]; then name=${1%%=*}; else name=$(basename "${{ inputs.repository || github.repository }}"); fi
+          echo "ARTIFACT=$name-macOS-$APP_VERSION" >> "$GITHUB_ENV"
+
       - name: Build
         run: |
           mkdir -p "$RELEASE_DIR"
@@ -103,6 +109,7 @@ jobs:
           done
 
       - name: Test
+        timeout-minutes: 20
         run: |
           [ -x .github/release/macos-test.sh ] || { echo "no .github/release/macos-test.sh"; exit 0; }
           for pair in $APPS; do ./.github/release/macos-test.sh "$RELEASE_DIR/${pair#*=}.app"; done
@@ -126,6 +133,7 @@ jobs:
 
       - name: Test, signed
         if: steps.sign.outputs.signed == 'true'
+        timeout-minutes: 20
         run: |
           [ -x .github/release/macos-test.sh ] || exit 0
           for pair in $APPS; do ./.github/release/macos-test.sh "$RELEASE_DIR/${pair#*=}.app"; done
@@ -167,11 +175,24 @@ jobs:
               SPARKLE_VERSION=2.10.0 GITHUB_OUTPUT=/dev/null "$GITHUB_WORKSPACE/.release-actions/sparkle-appcast/appcast.sh"
           done
 
+      # Named for the app and its version, like the files in it; a branch's
+      # is kept two weeks, a tag's as long as artifacts are (its release
+      # keeps the files for good).
       - uses: actions/upload-artifact@v4
         with:
-          name: macOS-${{ github.run_number }}
+          name: ${{ env.ARTIFACT }}
           path: ${{ github.workspace }}/out/*
           if-no-files-found: error
+          retention-days: ${{ env.TAG == '' && 14 || 90 }}
+
+      # What Xcode recorded of a failed test, for opening in Xcode.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ${{ env.ARTIFACT }}-test-results
+          path: ${{ runner.temp }}/*.xcresult
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Attach to the release
         if: env.TAG != ''
