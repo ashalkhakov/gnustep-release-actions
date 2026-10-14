@@ -70,6 +70,13 @@ tools=$(dirname "$(find "$stage/runtime" -name defaults.exe | head -n 1)")
 mkdir -p "$stage/runtime/bin"
 cp "$tools/defaults.exe" "$stage/runtime/bin/"
 
+# WinSparkle, for an app that updates itself (deps.sh put it in .deps when
+# pins.env names WINSPARKLE_VERSION), and its licence.
+if [ -f .deps/WinSparkle/WinSparkle.dll ]; then
+  cp .deps/WinSparkle/WinSparkle.dll "$stage/runtime/bin/"
+  cp .deps/WinSparkle/COPYING "$stage/metadata/licenses/WinSparkle.txt"
+fi
+
 if [ -n "$ICON" ]; then
   [ -f "$ICON" ] || { echo "::error::$conf names ICON $ICON, which is not there" >&2; exit 1; }
   cp "$ICON" "$stage/metadata/icons/app.ico"

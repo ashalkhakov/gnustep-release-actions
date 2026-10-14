@@ -5,12 +5,14 @@
 #   GNUSTEP_PATCHES_VERSION=2026.10.13   ashalkhakov/gnustep-patches, tag v2026.10.13
 #   FREECOREDATA_VERSION=0.5.0           ashalkhakov/freecoredata, tag v0.5.0
 #   SPARKLE_VERSION=2.10.0               sparkle-project/Sparkle, tag 2.10.0 (Apple)
+#   WINSPARKLE_VERSION=0.9.4             vslavik/winsparkle, tag v0.9.4 (Windows)
 #
 #   deps.sh linux   each one's <name>-<version>-ubuntu22.04-<arch>.tar.xz, unpacked
 #                   at / (they hold opt/gnustep), the stack first
 #   deps.sh windows each one's <name>-<version>-windows-clang64-x86_64.tar.xz,
-#                   unpacked at C:\ (they hold GNUstep), the stack first; in
-#                   an MSYS2 shell
+#                   unpacked at C:\ (they hold GNUstep), the stack first; and
+#                   WinSparkle's include/ and x64 DLL in .deps/WinSparkle;
+#                   in an MSYS2 shell
 #   deps.sh apple   each one's <name>-<version>-apple.zip (its XCFrameworks), and
 #                   Sparkle's, unpacked into .deps/ in the repository's root; a
 #                   release with no such zip has nothing for Apple (FreeCoreData:
@@ -46,6 +48,16 @@ while read -r name version; do
   repo=$(echo "$name" | tr 'A-Z_' 'a-z-')
   case "$platform:$name" in
     linux:SPARKLE|windows:SPARKLE) continue ;;
+    linux:WINSPARKLE|apple:WINSPARKLE) continue ;;
+    windows:WINSPARKLE)
+      fetch "https://github.com/vslavik/winsparkle/releases/download/v$version/WinSparkle-$version.zip" "$work/winsparkle.zip" \
+        || { echo "::error::no WinSparkle $version"; exit 1; }
+      unzip -q -o "$work/winsparkle.zip" -d "$work/winsparkle" -x '__MACOSX/*'
+      rm -rf .deps/WinSparkle && mkdir -p .deps/WinSparkle
+      cp -R "$work/winsparkle/WinSparkle-$version/include" "$work/winsparkle/WinSparkle-$version/x64/Release/." .deps/WinSparkle/
+      cp "$work/winsparkle/WinSparkle-$version/COPYING" .deps/WinSparkle/
+      echo "WinSparkle $version: .deps/WinSparkle ($(cd .deps/WinSparkle && ls | tr '\n' ' '))"
+      ;;
     apple:GNUSTEP_PATCHES) continue ;;
     apple:SPARKLE)
       # The XCFramework is in the zip Sparkle publishes for SwiftPM; it is

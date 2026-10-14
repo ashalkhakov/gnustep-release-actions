@@ -89,7 +89,7 @@ jobs:
         with:
           msystem: CLANG64
           update: true
-          install: git make patch python tar xz
+          install: git make patch python tar xz unzip
 
       - name: Version
         run: '"$GITHUB_WORKSPACE/.release-actions/scripts/version.sh"'
@@ -175,6 +175,20 @@ jobs:
           cp "$msi" "$out/"
           cp "$(dirname "$msi")"/*.zip "$out/" 2>/dev/null || true
           ls -la "$out"
+
+      # For a release only: the feed the app's WinSparkle reads, signed by
+      # the Mac's Sparkle key (WinSparkle checks it the same way).
+      - name: Appcast
+        if: steps.name.outputs.name && env.TAG != ''
+        env:
+          MSI: ${{ steps.msi.outputs.msi }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          out=$(cygpath -u "$GITHUB_WORKSPACE")/out
+          default=$(. .github/release/windows.conf; echo "$DEFAULT")
+          NAME=${{ steps.name.outputs.name }} \
+          PLIST=$(find "$STAGE" -path "*/$default.app/Resources/Info-gnustep.plist" | head -n 1) \
+            python3 "$GITHUB_WORKSPACE/.release-actions/msi/appcast.py" "$(cygpath -u "$MSI")" "$out/appcast-windows.xml"
 
       # Named for what it is and its version; a branch's is kept two weeks, a
       # tag's as long as artifacts are (its release keeps the files for good).
