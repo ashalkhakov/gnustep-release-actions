@@ -73,6 +73,8 @@ jobs:
           repository: ${{ inputs.repository || github.repository }}
           ref: ${{ inputs.ref || inputs.tag || (github.ref_type == 'tag' && github.ref_name) || github.ref }}
           path: source
+          # The whole history: the build number is the commit count (scripts/version.sh).
+          fetch-depth: 0
 
       # This workflow's own commit, whatever the caller named: its scripts
       # and actions come from there.
