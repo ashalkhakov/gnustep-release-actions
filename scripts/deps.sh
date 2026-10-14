@@ -5,9 +5,14 @@
 #   GNUSTEP_PATCHES_VERSION=2026.10.13   ashalkhakov/gnustep-patches, tag v2026.10.13
 #   FREECOREDATA_VERSION=0.5.0           ashalkhakov/freecoredata, tag v0.5.0
 #   SPARKLE_VERSION=2.10.0               sparkle-project/Sparkle, tag 2.10.0 (Apple)
+#   WINSPARKLE_VERSION=0.9.4             vslavik/winsparkle, tag v0.9.4 (Windows)
 #
 #   deps.sh linux   each one's <name>-<version>-ubuntu22.04-<arch>.tar.xz, unpacked
 #                   at / (they hold opt/gnustep), the stack first
+#   deps.sh windows each one's <name>-<version>-windows-clang64-x86_64.tar.xz,
+#                   unpacked at C:\ (they hold GNUstep), the stack first; and
+#                   WinSparkle's include/ and x64 DLL in .deps/WinSparkle;
+#                   in an MSYS2 shell
 #   deps.sh apple   each one's <name>-<version>-apple.zip (its XCFrameworks), and
 #                   Sparkle's, unpacked into .deps/ in the repository's root; a
 #                   release with no such zip has nothing for Apple (FreeCoreData:
@@ -16,7 +21,7 @@
 # <NAME> is the repository's name in capitals, '-' as '_'. Run from the
 # repository's root; a repository with no pins.env builds on nothing of ours.
 set -euo pipefail
-platform=${1:?usage: deps.sh linux|apple}
+platform=${1:?usage: deps.sh linux|windows|apple}
 pins=.github/pins.env
 [ -f "$pins" ] || { echo "no $pins: nothing to fetch"; exit 0; }
 
@@ -42,7 +47,17 @@ while read -r name version; do
   [ -n "$name" ] || continue
   repo=$(echo "$name" | tr 'A-Z_' 'a-z-')
   case "$platform:$name" in
-    linux:SPARKLE) continue ;;
+    linux:SPARKLE|windows:SPARKLE) continue ;;
+    linux:WINSPARKLE|apple:WINSPARKLE) continue ;;
+    windows:WINSPARKLE)
+      fetch "https://github.com/vslavik/winsparkle/releases/download/v$version/WinSparkle-$version.zip" "$work/winsparkle.zip" \
+        || { echo "::error::no WinSparkle $version"; exit 1; }
+      unzip -q -o "$work/winsparkle.zip" -d "$work/winsparkle" -x '__MACOSX/*'
+      rm -rf .deps/WinSparkle && mkdir -p .deps/WinSparkle
+      cp -R "$work/winsparkle/WinSparkle-$version/include" "$work/winsparkle/WinSparkle-$version/x64/Release/." .deps/WinSparkle/
+      cp "$work/winsparkle/WinSparkle-$version/COPYING" .deps/WinSparkle/
+      echo "WinSparkle $version: .deps/WinSparkle ($(cd .deps/WinSparkle && ls | tr '\n' ' '))"
+      ;;
     apple:GNUSTEP_PATCHES) continue ;;
     apple:SPARKLE)
       # The XCFramework is in the zip Sparkle publishes for SwiftPM; it is
@@ -64,6 +79,13 @@ while read -r name version; do
       # their times and modes, which only their owner may.
       tar -C / --no-overwrite-dir -xJf "$work/$file"
       echo "$repo $version: $(tar -tJf "$work/$file" | wc -l) files into /opt/gnustep"
+      ;;
+    windows:*)
+      file=$repo-$version-windows-clang64-x86_64.tar.xz
+      fetch "https://github.com/ashalkhakov/$repo/releases/download/v$version/$file" "$work/$file" \
+        || { echo "::error::no $file in $repo's v$version release"; exit 1; }
+      tar -C /c -xJf "$work/$file"
+      echo "$repo $version: $(tar -tJf "$work/$file" | wc -l) files into C:\\GNUstep"
       ;;
     apple:*)
       file=$repo-$version-apple.zip

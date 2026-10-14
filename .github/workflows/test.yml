@@ -2,7 +2,7 @@ name: Test
 
 # The workflows and actions here, tested as they are in this commit, on the
 # sample in test/sample: the smallest repository with everything they handle
-# (a library and an application on it, for Linux, macOS and iOS, an
+# (a library and an application on it, for Linux, Windows, macOS and iOS, an
 # AppImage and an image), built, tested, installed and packaged, without a
 # tag: nothing signed or released. A change is proven in its own pull
 # request, before any repository uses it.
@@ -22,6 +22,12 @@ permissions:
 jobs:
   linux:
     uses: ./.github/workflows/linux.yml
+    with:
+      directory: test/sample
+      library: true
+
+  windows:
+    uses: ./.github/workflows/windows.yml
     with:
       directory: test/sample
       library: true
