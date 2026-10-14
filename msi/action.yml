@@ -107,7 +107,10 @@ runs:
         $saved = $env:PATH
         try {
           $env:PATH = (@($dirs) + @("$env:SystemRoot\System32", $env:SystemRoot)) -join ";"
-          Get-ChildItem Env: | Where-Object { $_.Name -like "GNUSTEP_*" } | ForEach-Object { Remove-Item "Env:$($_.Name)" }
+          Get-ChildItem Env: | Where-Object { $_.Name -like "GNUSTEP_*" -or $_.Name -like "FONTCONFIG_*" } | ForEach-Object { Remove-Item "Env:$($_.Name)" }
+          # As the launcher sets it.
+          $env:FONTCONFIG_PATH = Join-Path $root "runtime\etc\fonts"
+          $env:FONTCONFIG_FILE = Join-Path $env:FONTCONFIG_PATH "fonts.conf"
           $out = Join-Path $env:RUNNER_TEMP "smoke-out.txt"
           $err = Join-Path $env:RUNNER_TEMP "smoke-err.txt"
           $args = @(-split $env:SMOKE)
@@ -116,6 +119,7 @@ runs:
           Get-Content $out, $err
           if ($app.ExitCode) { throw "$exe $env:SMOKE exited $($app.ExitCode)" }
           if (Select-String -Path $err -Pattern "is not an absolute path" -Quiet) { throw "gnustep-base read a GNUstep.conf with MSYS paths" }
+          if (Select-String -Path $err -Pattern "Fontconfig error" -Quiet) { throw "fontconfig found no configuration in the installed runtime" }
         } finally {
           $env:PATH = $saved
           if ($hidden) { Rename-Item C:\GNUstep.hidden GNUstep }

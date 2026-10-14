@@ -70,6 +70,12 @@ tools=$(dirname "$(find "$stage/runtime" -name defaults.exe | head -n 1)")
 mkdir -p "$stage/runtime/bin"
 cp "$tools/defaults.exe" "$stage/runtime/bin/"
 
+# Fontconfig's configuration (cairo finds fonts through it), MSYS2's, which
+# reads Windows' own fonts folder: the launcher points FONTCONFIG_FILE at
+# runtime\etc\fonts\fonts.conf when it is there.
+mkdir -p "$stage/runtime/etc"
+cp -a "${MINGW_PREFIX:-/clang64}/etc/fonts" "$stage/runtime/etc/"
+
 # WinSparkle, for an app that updates itself (deps.sh put it in .deps when
 # pins.env names WINSPARKLE_VERSION), and its licence.
 if [ -f .deps/WinSparkle/WinSparkle.dll ]; then
