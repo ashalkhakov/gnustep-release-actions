@@ -60,9 +60,10 @@ sign() {
 # --timestamp and --options runtime are what notarization requires. Signed
 # inside out: Sparkle's helpers first, as its documentation has it for a
 # Developer ID app (the downloader keeps its entitlements); then every
-# framework embedded (what is there, not a list); then the app, whose
-# signature seals theirs. Not --deep, which Apple deprecates and which signs
-# the helpers without what they need.
+# framework embedded (what is there, not a list); then every plug-in, each
+# after the frameworks it embeds; then the app, whose signature seals
+# theirs. Not --deep, which Apple deprecates and which signs the helpers
+# without what they need.
 sparkle="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
 if [ -d "$sparkle" ]; then
   sign "$sparkle/XPCServices/Installer.xpc"
@@ -73,6 +74,14 @@ fi
 shopt -s nullglob
 for fw in "$APP"/Contents/Frameworks/*.framework; do
   sign "$fw"
+done
+# Loadable bundles (UDCode's grammars): notarization checks each, and a
+# plug-in's code is not the app's to seal.
+for plugin in "$APP"/Contents/PlugIns/*; do
+  for fw in "$plugin"/Contents/Frameworks/*.framework; do
+    sign "$fw"
+  done
+  sign "$plugin"
 done
 # The app keeps the entitlements its build gave it (a sandboxed app's
 # sandbox, Sparkle's mach-lookup names), which --force would otherwise drop;
