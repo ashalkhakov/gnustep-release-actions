@@ -1,0 +1,105 @@
+name: MSI
+description: >
+  A GNUstep app's Windows installer, the same for every app: its apps and the
+  GNUstep runtime they run on, staged by msi.sh, made into
+  <NAME>-<version>-win64.msi (and a portable .zip) by gnustep-packager's MSI
+  backend (its launcher, WiX, the DLLs the runtime links from MSYS2), checked
+  by the packager (installed, launched, uninstalled) and by the app's own
+  smoke test, run installed with nothing of the build machine's on its PATH.
+  What is the app's own is in its windows.conf. Runs in windows.yml's MSYS2
+  shell, after make install.
+inputs:
+  config:
+    description: The app's windows.conf, from the repository's root
+    required: false
+    default: .github/release/windows.conf
+  working-directory:
+    description: The repository's root
+    required: false
+    default: .
+outputs:
+  msi:
+    description: The installer's path
+    value: ${{ steps.package.outputs.msi }}
+runs:
+  using: composite
+  steps:
+    - id: stage
+      shell: msys2 {0}
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        CONFIG: ${{ inputs.config }}
+      run: |
+        set -euo pipefail
+        out=$(cygpath -u "$RUNNER_TEMP")/msi
+        "$(cygpath -u "$GITHUB_ACTION_PATH")/msi.sh" "$CONFIG" "$out"
+        echo "out=$(cygpath -w "$out")" >> "$GITHUB_OUTPUT"
+        (. "$CONFIG"; echo "name=$NAME"; echo "default=$DEFAULT"; echo "smoke=${SMOKE:-}") >> "$GITHUB_OUTPUT"
+
+    # gnustep-packager at the commit this repository was tested with: moved
+    # here, on purpose, never by a branch moving.
+    - id: package
+      shell: pwsh
+      env:
+        OUT: ${{ steps.stage.outputs.out }}
+        GNUSTEP_PACKAGER_REF: 7aaf72d1da5e26ae79fca7e0f8bdac06b7fb37f9
+      run: |
+        $ErrorActionPreference = "Stop"
+        $packager = Join-Path $env:RUNNER_TEMP "gnustep-packager"
+        if (-not (Test-Path $packager)) {
+          git init -q $packager
+          git -C $packager remote add origin https://github.com/danjboyd/gnustep-packager.git
+          git -C $packager fetch -q --depth 1 origin $env:GNUSTEP_PACKAGER_REF
+          git -C $packager checkout -q FETCH_HEAD
+        }
+        $manifest = Join-Path $env:OUT "package.json"
+        & (Join-Path $packager "scripts/gnustep-packager.ps1") -Command package -Backend msi -Manifest $manifest
+        if ($LASTEXITCODE) { exit $LASTEXITCODE }
+        & (Join-Path $packager "scripts/gnustep-packager.ps1") -Command validate -Backend msi -Manifest $manifest -RunSmoke
+        if ($LASTEXITCODE) { exit $LASTEXITCODE }
+        $msi = Get-ChildItem (Join-Path $env:OUT "packages") -Filter *.msi | Select-Object -First 1
+        if (-not $msi) { throw "the packager made no .msi" }
+        Get-ChildItem (Join-Path $env:OUT "packages") | ForEach-Object { "{0} {1}" -f $_.Name, $_.Length }
+        "msi=$($msi.FullName)" >> $env:GITHUB_OUTPUT
+
+    # The app's own smoke test, installed: C:\GNUstep out of the way and
+    # nothing but Windows and the installed runtime on PATH, so what it needs
+    # and the installer lacks fails here, not on a user's machine.
+    - name: Smoke test, installed
+      if: steps.stage.outputs.smoke != ''
+      shell: pwsh
+      env:
+        MSI: ${{ steps.package.outputs.msi }}
+        NAME: ${{ steps.stage.outputs.name }}
+        DEFAULT: ${{ steps.stage.outputs.default }}
+        SMOKE: ${{ steps.stage.outputs.smoke }}
+      run: |
+        $ErrorActionPreference = "Stop"
+        $log = Join-Path $env:RUNNER_TEMP "smoke-install.log"
+        $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @("/i", $env:MSI, "/qn", "/norestart", "/l*v", $log)
+        if ($p.ExitCode) { Get-Content $log -Tail 40; throw "msiexec /i exited $($p.ExitCode)" }
+        $root = Join-Path $env:LOCALAPPDATA $env:NAME
+        $exe = Join-Path $root "app\$($env:DEFAULT).app\$($env:DEFAULT).exe"
+        if (-not (Test-Path $exe)) { throw "not installed: $exe" }
+        $dirs = Get-ChildItem (Join-Path $root "runtime") -Recurse -Filter *.dll |
+          Where-Object { $_.DirectoryName -notmatch '\.(bundle|theme|nssound)' } |
+          ForEach-Object { $_.DirectoryName } | Sort-Object -Unique
+        $hidden = $false
+        if (Test-Path C:\GNUstep) { Rename-Item C:\GNUstep GNUstep.hidden; $hidden = $true }
+        $saved = $env:PATH
+        try {
+          $env:PATH = (@($dirs) + @("$env:SystemRoot\System32", $env:SystemRoot)) -join ";"
+          Get-ChildItem Env: | Where-Object { $_.Name -like "GNUSTEP_*" } | ForEach-Object { Remove-Item "Env:$($_.Name)" }
+          $out = Join-Path $env:RUNNER_TEMP "smoke-out.txt"
+          $err = Join-Path $env:RUNNER_TEMP "smoke-err.txt"
+          $args = @(-split $env:SMOKE)
+          $app = Start-Process $exe -ArgumentList $args -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+          if (-not $app.WaitForExit(120000)) { $app | Stop-Process -Force; throw "$exe $env:SMOKE did not exit within 120 seconds" }
+          Get-Content $out, $err
+          if ($app.ExitCode) { throw "$exe $env:SMOKE exited $($app.ExitCode)" }
+          if (Select-String -Path $err -Pattern "is not an absolute path" -Quiet) { throw "gnustep-base read a GNUstep.conf with MSYS paths" }
+        } finally {
+          $env:PATH = $saved
+          if ($hidden) { Rename-Item C:\GNUstep.hidden GNUstep }
+          Start-Process msiexec.exe -Wait -ArgumentList @("/x", $env:MSI, "/qn", "/norestart") | Out-Null
+        }

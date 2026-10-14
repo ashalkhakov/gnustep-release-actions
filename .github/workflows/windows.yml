@@ -9,7 +9,9 @@
 #
 # then what was installed, packaged: for a library (library: true) an archive
 # of it, <repository>-<version>-windows-clang64-x86_64.tar.xz, for what builds
-# on it. Uploaded, and for a tag attached to the release.
+# on it; for an application (.github/release/windows.conf) an installer,
+# <NAME>-<version>-win64.msi (msi), smoke-tested installed. Uploaded, and for
+# a tag attached to the release.
 #
 # The same steps as linux.yml, in the same order; what Windows does
 # differently is said where it is done.
@@ -144,6 +146,35 @@ jobs:
           mkdir -p "$out"
           tar -C "$STAGE/c" -cJf "$out/$name-$APP_VERSION-windows-clang64-x86_64.tar.xz" GNUstep
           echo "ARTIFACT=$name-$APP_VERSION-windows-clang64-x86_64" >> "$GITHUB_ENV"
+
+      # An application's: its installer, when it has a windows.conf.
+      - name: The installer's name
+        id: name
+        run: |
+          [ -f .github/release/windows.conf ] || { echo "no .github/release/windows.conf: no installer"; exit 0; }
+          name=$(. .github/release/windows.conf; echo "${NAME:-}")
+          [ -n "$name" ] || { echo "::error::.github/release/windows.conf names no NAME"; exit 1; }
+          [ -n "${ARTIFACT:-}" ] || echo "ARTIFACT=$name-$APP_VERSION-win64" >> "$GITHUB_ENV"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: The installer
+        id: msi
+        if: steps.name.outputs.name
+        uses: ./.release-actions/msi
+        with:
+          working-directory: ${{ github.workspace }}/source/${{ inputs.directory }}
+
+      - name: Out
+        if: steps.name.outputs.name
+        env:
+          MSI: ${{ steps.msi.outputs.msi }}
+        run: |
+          out=$(cygpath -u "$GITHUB_WORKSPACE")/out
+          mkdir -p "$out"
+          msi=$(cygpath -u "$MSI")
+          cp "$msi" "$out/"
+          cp "$(dirname "$msi")"/*.zip "$out/" 2>/dev/null || true
+          ls -la "$out"
 
       # Named for what it is and its version; a branch's is kept two weeks, a
       # tag's as long as artifacts are (its release keeps the files for good).
