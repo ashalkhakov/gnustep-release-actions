@@ -7,7 +7,9 @@
 #   make -f Makefile.apple check                   test
 #   make -f Makefile.apple install DESTDIR=<dir>   install: each app (apps:,
 #                                                  by its bundle name), and a
-#                                                  library's XCFrameworks
+#                                                  library's XCFrameworks (and
+#                                                  PlugIns/, loadable bundles
+#                                                  for apps that embed it)
 #   make -f Makefile.apple installcheck DESTDIR=<dir>   optional: test what was
 #                                                  installed; again once signed
 #                                                  (the hardened runtime loads
@@ -174,7 +176,8 @@ jobs:
             ditto -c -k --keepParent "$RELEASE_DIR/${pair#*=}.app" "$GITHUB_WORKSPACE/out/${pair%%=*}-macOS-${APP_VERSION}${suffix}.zip"
           done
           # A library's XCFrameworks, together, as what builds on it unpacks
-          # them into its .deps/ (scripts/deps.sh).
+          # them into its .deps/ (scripts/deps.sh); and its PlugIns/ when it
+          # has loadable bundles for an app to embed (UDCodeKit's grammars).
           if [ "${{ inputs.library }}" = true ]; then
             name=$(basename "${{ inputs.repository || github.repository }}" | tr 'A-Z' 'a-z')
             (cd "$RELEASE_DIR" && ls -d *.xcframework > /dev/null 2>&1) \
@@ -182,6 +185,7 @@ jobs:
             # ditto, as deps.sh unpacks it: a framework is symlinks inside.
             frameworks=$(mktemp -d)
             cp -R "$RELEASE_DIR"/*.xcframework "$frameworks/"
+            if [ -d "$RELEASE_DIR/PlugIns" ]; then cp -R "$RELEASE_DIR/PlugIns" "$frameworks/"; fi
             ditto -c -k "$frameworks" "$GITHUB_WORKSPACE/out/$name-$APP_VERSION-apple.zip"
           fi
           ls -la "$GITHUB_WORKSPACE/out"
