@@ -173,6 +173,9 @@ manifest = {
     "installDirectoryName": name,
     "launcherFileName": name + ".exe",
     "runtimeSearchRoots": [r"$msys_bin"],
+    # Part of every Windows (LDAP, which libcurl links), missing from the
+    # packager's list of system DLLs.
+    "ignoredRuntimeDependencies": ["WLDAP32.dll"],
   }},
 }
 if "$ICON":
