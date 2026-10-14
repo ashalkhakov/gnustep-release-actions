@@ -1,0 +1,164 @@
+# A repository's Windows build, the same for every repository: what it builds
+# on (its .github/pins.env: the GNUstep stack and our libraries, each an
+# archive of its release) unpacked into C:\GNUstep, then its own GNUmakefile,
+# the familiar way, in MSYS2's CLANG64 environment:
+#
+#   make                         build
+#   make check                   test
+#   make install DESTDIR=<dir>   install, into a staging directory
+#
+# then what was installed, packaged: for a library (library: true) an archive
+# of it, <repository>-<version>-windows-clang64-x86_64.tar.xz, for what builds
+# on it. Uploaded, and for a tag attached to the release.
+#
+# The same steps as linux.yml, in the same order; what Windows does
+# differently is said where it is done.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The tag to build and release (empty for a push's own tag, or none)
+        type: string
+        default: ''
+      repository:
+        description: The repository to build (default the calling one)
+        type: string
+        default: ''
+      ref:
+        description: The commit or branch of it to build (default the tag, else the commit that started the run)
+        type: string
+        default: ''
+      directory:
+        description: Where in the repository it is (its root by default)
+        type: string
+        default: .
+      library:
+        description: A library, whose installed files are published for what builds on it
+        type: boolean
+        default: false
+      extra-packages:
+        description: The repository's own build dependencies (MSYS2 packages, as in the stack's packages-msys2.txt), beyond what the stack needs
+        type: string
+        default: ''
+
+jobs:
+  windows:
+    name: Windows (x86_64)
+    runs-on: windows-2025
+    timeout-minutes: 120
+    env:
+      TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+      CC: clang
+      CXX: clang++
+      LIBRARY_COMBO: ng-gnu-gnu
+      RUNTIME_VERSION: gnustep-2.0
+      PREFIX: /c/GNUstep
+    defaults:
+      run:
+        shell: msys2 {0}
+        working-directory: ${{ github.workspace }}/source/${{ inputs.directory }}
+    steps:
+      # A checkout with CRLF line endings breaks shell scripts and the
+      # patches a build applies; the repository's files as they are.
+      - name: Line endings
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository || github.repository }}
+          ref: ${{ inputs.ref || inputs.tag || (github.ref_type == 'tag' && github.ref_name) || github.ref }}
+          path: source
+          # The whole history: the build number is the commit count (scripts/version.sh).
+          fetch-depth: 0
+
+      # This workflow's own commit, whatever the caller named: its scripts
+      # and actions come from there.
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .release-actions
+
+      # The shell the rest runs in, with what the scripts here use; the
+      # stack's own list comes after the stack.
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          update: true
+          install: git make patch python tar xz
+
+      - name: Version
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/version.sh"'
+
+      - name: Stamp the version
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/stamp-version.sh"'
+
+      - name: What it builds on
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/deps.sh" windows'
+
+      # The packages building on the stack needs (its own list, beside it),
+      # and the repository's. A mirror that stalls fails the download;
+      # pacman tries another the next time.
+      - name: Packages
+        env:
+          EXTRA: ${{ inputs.extra-packages }}
+        run: |
+          list=$PREFIX/share/gnustep-patches/packages-msys2.txt
+          [ -f "$list" ] || { echo "::error::no GNUstep stack in $PREFIX: does .github/pins.env name GNUSTEP_PATCHES_VERSION?"; exit 1; }
+          packages=$(grep -v '^#' "$list" | sed "/\//!s/^/$MINGW_PACKAGE_PREFIX-/" | tr '\n' ' ')
+          extra=$(for p in $EXTRA; do case "$p" in */*) echo "$p" ;; *) echo "$MINGW_PACKAGE_PREFIX-$p" ;; esac; done | tr '\n' ' ')
+          for i in 1 2 3; do
+            pacman -S --noconfirm --needed $packages $extra && break
+            [ "$i" != 3 ] || exit 1
+            sleep 10
+          done
+          "$PREFIX/share/gnustep-patches/build-gnustep.sh" --verify-only
+          echo "GNUstep $(cat "$PREFIX/share/gnustep-patches/VERSION")"
+
+      - name: make
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/gnustep-make.sh"'
+
+      - name: make check
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/gnustep-make.sh" check'
+
+      # Under the staging directory at the prefix's own path, c/GNUstep, as
+      # gnustep-make installs there.
+      - name: make install
+        run: |
+          stage=$(cygpath -u "$RUNNER_TEMP")/stage
+          rm -rf "$stage"
+          "$GITHUB_WORKSPACE/.release-actions/scripts/gnustep-make.sh" install DESTDIR="$stage"
+          echo "STAGE=$stage" >> "$GITHUB_ENV"
+          (cd "$stage" && find . -type f | sed 's|^\./|  /|' | head -50)
+
+      # What was installed, under GNUstep, as what builds on it unpacks it:
+      # at C:\.
+      - name: The library's archive
+        if: inputs.library
+        run: |
+          [ -d "$STAGE/c/GNUstep" ] || { echo "::error::make install put nothing under C:\\GNUstep"; exit 1; }
+          name=$(basename "${{ inputs.repository || github.repository }}" | tr 'A-Z' 'a-z')
+          out=$(cygpath -u "$GITHUB_WORKSPACE")/out
+          mkdir -p "$out"
+          tar -C "$STAGE/c" -cJf "$out/$name-$APP_VERSION-windows-clang64-x86_64.tar.xz" GNUstep
+          echo "ARTIFACT=$name-$APP_VERSION-windows-clang64-x86_64" >> "$GITHUB_ENV"
+
+      # Named for what it is and its version; a branch's is kept two weeks, a
+      # tag's as long as artifacts are (its release keeps the files for good).
+      - uses: actions/upload-artifact@v4
+        if: env.ARTIFACT != ''
+        with:
+          name: ${{ env.ARTIFACT }}
+          path: ${{ github.workspace }}/out/*
+          if-no-files-found: error
+          retention-days: ${{ env.TAG == '' && 14 || 90 }}
+
+      - name: Attach to the release
+        if: env.TAG != '' && env.ARTIFACT != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          prerelease: ${{ contains(env.TAG, '-') }}
+          files: ${{ github.workspace }}/out/*
