@@ -153,8 +153,9 @@ manifest = {
   "validation": {
     "smoke": {"enabled": True, "kind": "staged-layout", "requiredPaths": [], "timeoutSeconds": 60, "stayAliveSeconds": 5},
     "logs": {"retainOnSuccess": True},
-    "packageContract": {"requiredContent": [{"kind": "bundled-theme", "name": "$THEME"}]},
-    "installedResult": {"requiredContent": [{"kind": "bundled-theme", "name": "$THEME"}]},
+    # No bundled-theme contract: the packager looks for themes in the System
+    # domain and MSYS2's trees, and the stack's is in Local; the stack's
+    # verify and the installed smoke test check it instead.
   },
   "integrations": {"shortcutName": name, "fileAssociations": []},
   "compliance": {"runtimeNotices": [{
