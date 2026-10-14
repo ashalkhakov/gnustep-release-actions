@@ -62,10 +62,10 @@ runs:
         }
         $manifest = Join-Path $env:OUT "package.json"
         # The packager's own log says what an exception does not.
-        function Invoke-Packager([string[]]$arguments) {
+        function Invoke-Packager([hashtable]$arguments) {
           try {
             & (Join-Path $packager "scripts/gnustep-packager.ps1") @arguments -Manifest $manifest
-            if ($LASTEXITCODE) { throw "gnustep-packager $arguments exited $LASTEXITCODE" }
+            if ($LASTEXITCODE) { throw "gnustep-packager $($arguments.Command) exited $LASTEXITCODE" }
           } catch {
             Get-ChildItem (Join-Path $env:OUT "logs") -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
               "::group::$($_.Name)"; Get-Content $_.FullName -Tail 80; "::endgroup::"
@@ -73,8 +73,8 @@ runs:
             throw
           }
         }
-        Invoke-Packager @("-Command", "package", "-Backend", "msi")
-        Invoke-Packager @("-Command", "validate", "-Backend", "msi", "-RunSmoke")
+        Invoke-Packager @{ Command = "package"; Backend = "msi" }
+        Invoke-Packager @{ Command = "validate"; Backend = "msi"; RunSmoke = $true }
         $msi = Get-ChildItem (Join-Path $env:OUT "packages") -Filter *.msi | Select-Object -First 1
         if (-not $msi) { throw "the packager made no .msi" }
         Get-ChildItem (Join-Path $env:OUT "packages") | ForEach-Object { "{0} {1}" -f $_.Name, $_.Length }
