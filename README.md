@@ -109,7 +109,9 @@ The workflows write the version first ([`scripts/stamp-version.sh`](scripts/stam
 by key, into every Xcode project, `.xcconfig`, Info.plist and app GNUmakefile,
 so a repository keeps no stamping of its own: `APP_VERSION` (`1.2.3`, or
 `0.0.0-build<n>`) and `BUILD_NUMBER` (CFBundleVersion, which Sparkle
-compares). `databases:` starts PostgreSQL, MySQL and MariaDB for `make
+compares: 1000 and the commit count, so the same commit has the same number
+whatever workflow builds it, and it only goes up; the workflows check out the
+whole history for it, [`scripts/version.sh`](scripts/version.sh)). `databases:` starts PostgreSQL, MySQL and MariaDB for `make
 check`, and hands it `POSTGRES_URL`, `MYSQL_URL`, `MARIADB_URL`
 ([`scripts/databases.sh`](scripts/databases.sh)); `CI` is set, so a test that
 was not given its service fails rather than skips.
