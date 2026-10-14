@@ -34,6 +34,8 @@ runs:
         out=$(cygpath -u "$RUNNER_TEMP")/msi
         "$(cygpath -u "$GITHUB_ACTION_PATH")/msi.sh" "$CONFIG" "$out"
         echo "out=$(cygpath -w "$out")" >> "$GITHUB_OUTPUT"
+        echo "msys=$(cygpath -w /)" >> "$GITHUB_OUTPUT"
+        echo "toolchain=$(cygpath -w "${MINGW_PREFIX:-/clang64}/bin")" >> "$GITHUB_OUTPUT"
         (. "$CONFIG"; echo "name=$NAME"; echo "default=$DEFAULT"; echo "smoke=${SMOKE:-}") >> "$GITHUB_OUTPUT"
 
     # gnustep-packager at the commit this repository was tested with: moved
@@ -42,9 +44,15 @@ runs:
       shell: pwsh
       env:
         OUT: ${{ steps.stage.outputs.out }}
+        # The packager compiles its launcher with the first clang it finds
+        # (C:\msys64's, else PATH's: the runner's own is MSVC's), and leaves
+        # MSYS2 off PATH for its smoke launch when told where MSYS2 is.
+        MSYS2_LOCATION: ${{ steps.stage.outputs.msys }}
+        TOOLCHAIN: ${{ steps.stage.outputs.toolchain }}
         GNUSTEP_PACKAGER_REF: 7aaf72d1da5e26ae79fca7e0f8bdac06b7fb37f9
       run: |
         $ErrorActionPreference = "Stop"
+        $env:PATH = "$env:TOOLCHAIN;$env:PATH"
         $packager = Join-Path $env:RUNNER_TEMP "gnustep-packager"
         if (-not (Test-Path $packager)) {
           git init -q $packager
