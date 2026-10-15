@@ -122,8 +122,27 @@ jobs:
       - name: make
         run: '"$GITHUB_WORKSPACE/.release-actions/scripts/gnustep-make.sh"'
 
+      # A time of its own: a check that hangs fails here, with its log,
+      # not the job at its limit, cancelled, with none.
       - name: make check
+        id: check
+        timeout-minutes: 45
         run: '"$GITHUB_WORKSPACE/.release-actions/scripts/gnustep-make.sh" check'
+
+      # Failed or hung: what it ran, to run again under Wine
+      # (scripts/wine-bundle.sh says how), kept a week.
+      - name: For Wine
+        if: always() && (steps.check.outcome == 'failure' || steps.check.outcome == 'cancelled')
+        env:
+          REPOSITORY: ${{ inputs.repository || github.repository }}
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/wine-bundle.sh" "$(cygpath -u "$RUNNER_TEMP")/wine" "$REPOSITORY"'
+
+      - uses: actions/upload-artifact@v4
+        if: always() && (steps.check.outcome == 'failure' || steps.check.outcome == 'cancelled')
+        with:
+          name: ${{ github.event.repository.name }}-windows-wine
+          path: ${{ runner.temp }}/wine/*
+          retention-days: 7
 
       # Under the staging directory at the prefix's own path, c/GNUstep, as
       # gnustep-make installs there.
