@@ -42,6 +42,10 @@ on:
         description: The repository's own build dependencies (MSYS2 packages, as in the stack's packages-msys2.txt), beyond what the stack needs
         type: string
         default: ''
+      wine:
+        description: What was built, kept before it is checked, to run under Wine on Linux (scripts/wine-bundle.sh); for a check that takes the runner down with it
+        type: boolean
+        default: false
 
 jobs:
   windows:
@@ -121,6 +125,21 @@ jobs:
 
       - name: make
         run: '"$GITHUB_WORKSPACE/.release-actions/scripts/gnustep-make.sh"'
+
+      # Kept before the check, asked for: a check that takes the runner down
+      # (it lost, its log is gone) leaves nothing after it.
+      - name: For Wine, before the check
+        if: inputs.wine
+        env:
+          REPOSITORY: ${{ inputs.repository || github.repository }}
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/wine-bundle.sh" "$(cygpath -u "$RUNNER_TEMP")/wine-built" "$REPOSITORY"'
+
+      - uses: actions/upload-artifact@v4
+        if: inputs.wine
+        with:
+          name: ${{ github.event.repository.name }}-windows-wine-built
+          path: ${{ runner.temp }}/wine-built/*
+          retention-days: 7
 
       # A time of its own: a check that hangs fails here, with its log,
       # not the job at its limit, cancelled, with none.
