@@ -46,6 +46,10 @@ on:
         description: What was built, kept before it is checked, to run under Wine on Linux (scripts/wine-bundle.sh); for a check that takes the runner down with it
         type: boolean
         default: false
+      wine-make:
+        description: With wine, what to make first, by make's arguments separated by ';' (the checks' programs, built and not run, e.g. '-C Tests;-C Tests/ModelBuilder')
+        type: string
+        default: ''
 
 jobs:
   windows:
@@ -132,7 +136,15 @@ jobs:
         if: inputs.wine
         env:
           REPOSITORY: ${{ inputs.repository || github.repository }}
-        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/wine-bundle.sh" "$(cygpath -u "$RUNNER_TEMP")/wine-built" "$REPOSITORY"'
+          WINE_MAKE: ${{ inputs.wine-make }}
+        run: |
+          IFS=';' read -ra makes <<< "$WINE_MAKE"
+          for args in "${makes[@]}"; do
+            [ -n "${args// }" ] || continue
+            echo "make $args"
+            "$GITHUB_WORKSPACE/.release-actions/scripts/gnustep-make.sh" -j1 $args
+          done
+          "$GITHUB_WORKSPACE/.release-actions/scripts/wine-bundle.sh" "$(cygpath -u "$RUNNER_TEMP")/wine-built" "$REPOSITORY"
 
       - uses: actions/upload-artifact@v4
         if: inputs.wine
