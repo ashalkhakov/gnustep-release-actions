@@ -39,7 +39,10 @@ export WINEDEBUG="${WINEDEBUG:--all}"
 for d in GNUstep clang64; do
   [ -e "$WINEPREFIX/drive_c/$d" ] || ln -s "$here/drive_c/$d" "$WINEPREFIX/drive_c/$d"
 done
-export WINEPATH='C:\GNUstep\bin;C:\GNUstep\Local\Tools;C:\GNUstep\System\Tools;C:\GNUstep\Local\Library\Libraries;C:\GNUstep\System\Library\Libraries;C:\clang64\bin'
+# The repository's own DLLs (a framework's, a library's) where it built
+# them, as its check finds them on PATH: Wine's Z: is /.
+own=$(find "$here/source" -name '*.dll' -exec dirname {} \; | sort -u | sed 's|/|\\|g; s|^|Z:|' | tr '\n' ';')
+export WINEPATH="${own}C:\\GNUstep\\bin;C:\\GNUstep\\Local\\Tools;C:\\GNUstep\\System\\Tools;C:\\GNUstep\\Local\\Library\\Libraries;C:\\GNUstep\\System\\Library\\Libraries;C:\\clang64\\bin"
 exec wine "$@"
 EOF
 chmod +x "$root/run-under-wine.sh"
