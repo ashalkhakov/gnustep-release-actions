@@ -42,6 +42,18 @@ on:
         description: The repository's own build dependencies (MSYS2 packages, as in the stack's packages-msys2.txt), beyond what the stack needs
         type: string
         default: ''
+      databases:
+        description: Database servers its tests use (postgres mysql mariadb), started for make check; see scripts/databases-windows.ps1
+        type: string
+        default: ''
+      keep-build:
+        description: What was built, kept before it is checked, to run on Windows or under Wine (scripts/build-bundle.sh); for a check that takes the runner down with it
+        type: boolean
+        default: false
+      keep-build-make:
+        description: With keep-build, what to make first, by make's arguments separated by ';' (the checks' programs, built and not run, e.g. '-C Tests;-C Tests/ModelBuilder')
+        type: string
+        default: ''
 
 jobs:
   windows:
@@ -119,11 +131,62 @@ jobs:
           "$PREFIX/share/gnustep-patches/build-gnustep.sh" --verify-only
           echo "GNUstep $(cat "$PREFIX/share/gnustep-patches/VERSION")"
 
+      # On the runner itself: its Docker runs Windows containers only.
+      - name: Databases
+        if: inputs.databases != ''
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        env:
+          DATABASES: ${{ inputs.databases }}
+        run: '& "$env:GITHUB_WORKSPACE/.release-actions/scripts/databases-windows.ps1"'
+
       - name: make
         run: '"$GITHUB_WORKSPACE/.release-actions/scripts/gnustep-make.sh"'
 
+      # Kept before the check, asked for: a check that takes the runner down
+      # (it lost, its log is gone) leaves nothing after it.
+      - name: The build, kept before the check
+        if: inputs.keep-build
+        env:
+          REPOSITORY: ${{ inputs.repository || github.repository }}
+          KEEP_BUILD_MAKE: ${{ inputs.keep-build-make }}
+        run: |
+          IFS=';' read -ra makes <<< "$KEEP_BUILD_MAKE"
+          for args in "${makes[@]}"; do
+            [ -n "${args// }" ] || continue
+            echo "make $args"
+            "$GITHUB_WORKSPACE/.release-actions/scripts/gnustep-make.sh" -j1 $args
+          done
+          "$GITHUB_WORKSPACE/.release-actions/scripts/build-bundle.sh" "$(cygpath -u "$RUNNER_TEMP")/build-kept" "$REPOSITORY"
+
+      - uses: actions/upload-artifact@v4
+        if: inputs.keep-build
+        with:
+          name: ${{ github.event.repository.name }}-windows-build
+          path: ${{ runner.temp }}/build-kept/*
+          retention-days: 7
+
+      # A time of its own: a check that hangs fails here, with its log,
+      # not the job at its limit, cancelled, with none.
       - name: make check
+        id: check
+        timeout-minutes: 45
         run: '"$GITHUB_WORKSPACE/.release-actions/scripts/gnustep-make.sh" check'
+
+      # Failed or hung: what it ran, to run again on Windows or under Wine
+      # (scripts/build-bundle.sh says how), kept a week.
+      - name: The build, for a failed check
+        if: always() && (steps.check.outcome == 'failure' || steps.check.outcome == 'cancelled')
+        env:
+          REPOSITORY: ${{ inputs.repository || github.repository }}
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/build-bundle.sh" "$(cygpath -u "$RUNNER_TEMP")/build-failed" "$REPOSITORY"'
+
+      - uses: actions/upload-artifact@v4
+        if: always() && (steps.check.outcome == 'failure' || steps.check.outcome == 'cancelled')
+        with:
+          name: ${{ github.event.repository.name }}-windows-build-failed
+          path: ${{ runner.temp }}/build-failed/*
+          retention-days: 7
 
       # Under the staging directory at the prefix's own path, c/GNUstep, as
       # gnustep-make installs there.

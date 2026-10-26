@@ -88,6 +88,13 @@ jobs:
       library: true                          # a library: publish its archives (x86_64, aarch64)
       extra-packages: libsqlite3-dev libpq-dev
       databases: postgres mysql mariadb      # for make check: POSTGRES_URL, ...
+  windows:
+    uses: ashalkhakov/gnustep-release-actions/.github/workflows/windows.yml@v1
+    with:
+      tag: ${{ inputs.tag }}
+      library: true                          # a library: publish its archive
+      extra-packages: sqlite3 postgresql     # MSYS2 CLANG64 packages, short names
+      databases: postgres mysql mariadb      # the same variables as on Linux
   macos:
     uses: ashalkhakov/gnustep-release-actions/.github/workflows/macos.yml@v1
     with:
@@ -114,12 +121,34 @@ whatever workflow builds it, and it only goes up; the workflows check out the
 whole history for it, [`scripts/version.sh`](scripts/version.sh)). `databases:` starts PostgreSQL, MySQL and MariaDB for `make
 check`, and hands it `POSTGRES_URL`, `MYSQL_URL`, `MARIADB_URL`
 ([`scripts/databases.sh`](scripts/databases.sh)); `CI` is set, so a test that
-was not given its service fails rather than skips.
+was not given its service fails rather than skips. On Windows the same
+servers run on the runner itself, with the same ports, users and variables
+([`scripts/databases-windows.ps1`](scripts/databases-windows.ps1)): its
+Docker runs Windows containers only.
 
 An application with an AppImage has `.github/release/appimage.conf` (below);
 one with Docker images, `docker.yml` and, optionally,
 `.github/release/docker-test.sh <target> <image>`, which exercises an image
 it is given.
+
+## The Windows installer
+
+[`windows.yml`](.github/workflows/windows.yml) builds in MSYS2's CLANG64 on
+the GNUstep stack, as Linux does. An application with
+`.github/release/windows.conf` also gets an installer,
+`<NAME>-<version>-win64.msi`, made by [`msi/`](msi/msi.sh) with
+gnustep-packager: its apps, the GNUstep runtime beside them, WinUXTheme
+(Windows' own look, menus in the window). `NAME`, `APPS` and `DEFAULT` are
+needed; `ICON` is an `.ico` or a PNG of at most 256x256. The installed app is
+smoke-tested with only Windows and its runtime on `PATH`: `SMOKE` starts it
+with arguments it must exit 0 from (a self-test), or, for an app with none,
+`SMOKE_STAYS_UP` the seconds it must still be running, its nibs loaded.
+
+`keep-build: true` uploads the build before `make check` (with
+`keep-build-make`, the checks' programs built first): a `.tar.xz` with the
+stack and CLANG64's DLLs and a `run.bat`, to run any of its programs on a
+Windows machine, or `run-under-wine.sh` under Wine. `make check` has 45
+minutes; one that fails or hangs leaves the same bundle for a week.
 
 ## The AppImage: one launcher, one packager
 

@@ -36,7 +36,7 @@ runs:
         echo "out=$(cygpath -w "$out")" >> "$GITHUB_OUTPUT"
         echo "msys=$(cygpath -w /)" >> "$GITHUB_OUTPUT"
         echo "toolchain=$(cygpath -w "${MINGW_PREFIX:-/clang64}/bin")" >> "$GITHUB_OUTPUT"
-        (. "$CONFIG"; echo "name=$NAME"; echo "default=$DEFAULT"; echo "smoke=${SMOKE:-}") >> "$GITHUB_OUTPUT"
+        (. "$CONFIG"; echo "name=$NAME"; echo "default=$DEFAULT"; echo "smoke=${SMOKE:-}"; echo "stays_up=${SMOKE_STAYS_UP:-}") >> "$GITHUB_OUTPUT"
 
     # gnustep-packager at the commit this repository was tested with: moved
     # here, on purpose, never by a branch moving.
@@ -84,13 +84,14 @@ runs:
     # nothing but Windows and the installed runtime on PATH, so what it needs
     # and the installer lacks fails here, not on a user's machine.
     - name: Smoke test, installed
-      if: steps.stage.outputs.smoke != ''
+      if: steps.stage.outputs.smoke != '' || steps.stage.outputs.stays_up != ''
       shell: pwsh
       env:
         MSI: ${{ steps.package.outputs.msi }}
         NAME: ${{ steps.stage.outputs.name }}
         DEFAULT: ${{ steps.stage.outputs.default }}
         SMOKE: ${{ steps.stage.outputs.smoke }}
+        STAYS_UP: ${{ steps.stage.outputs.stays_up }}
       run: |
         $ErrorActionPreference = "Stop"
         $log = Join-Path $env:RUNNER_TEMP "smoke-install.log"
@@ -113,11 +114,24 @@ runs:
           $env:FONTCONFIG_FILE = Join-Path $env:FONTCONFIG_PATH "fonts.conf"
           $out = Join-Path $env:RUNNER_TEMP "smoke-out.txt"
           $err = Join-Path $env:RUNNER_TEMP "smoke-err.txt"
-          $args = @(-split $env:SMOKE)
-          $app = Start-Process $exe -ArgumentList $args -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
-          if (-not $app.WaitForExit(120000)) { $app | Stop-Process -Force; throw "$exe $env:SMOKE did not exit within 120 seconds" }
-          Get-Content $out, $err
-          if ($app.ExitCode) { throw "$exe $env:SMOKE exited $($app.ExitCode)" }
+          if ($env:SMOKE) {
+            $args = @(-split $env:SMOKE)
+            $app = Start-Process $exe -ArgumentList $args -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+            if (-not $app.WaitForExit(120000)) { $app | Stop-Process -Force; throw "$exe $env:SMOKE did not exit within 120 seconds" }
+            Get-Content $out, $err
+            if ($app.ExitCode) { throw "$exe $env:SMOKE exited $($app.ExitCode)" }
+          } else {
+            # No self-test: started bare, it is still running a while later,
+            # and said nothing of a nib it could not load (an app without its
+            # interface stays up too).
+            $app = Start-Process $exe -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+            if ($app.WaitForExit([int]$env:STAYS_UP * 1000)) { Get-Content $out, $err; throw "$exe exited $($app.ExitCode) within $env:STAYS_UP seconds" }
+            $app | Stop-Process -Force
+            $app.WaitForExit()
+            Get-Content $out, $err
+            if (Select-String -Path $err -Pattern "Failed to load Xib|could not load nib|failed to load MainMenu" -Quiet) { throw "$exe did not load its interface" }
+            Write-Output "$($env:DEFAULT): up after $($env:STAYS_UP) seconds"
+          }
           if (Select-String -Path $err -Pattern "is not an absolute path" -Quiet) { throw "gnustep-base read a GNUstep.conf with MSYS paths" }
           if (Select-String -Path $err -Pattern "Fontconfig error" -Quiet) { throw "fontconfig found no configuration in the installed runtime" }
         } finally {
