@@ -163,7 +163,10 @@ manifest = {
   "launch": {
     "entryRelativePath": "app/%s.app/%s.exe" % (default, default),
     "workingDirectory": ".",
-    "arguments": [],
+    # The theme as an argument: a default the launcher seeds goes into one
+    # domain of the package's name, which an app reads only if its bundle
+    # identifier is that; an argument every app reads.
+    "arguments": ["-GSTheme", "$THEME"],
     "pathPrepend": path_dirs,
     "env": {},
   },
