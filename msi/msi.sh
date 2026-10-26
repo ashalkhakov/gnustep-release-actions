@@ -21,17 +21,21 @@
 #                 product's, its Start menu shortcut's and its directory's
 #   APPS          the .app wrappers it carries
 #   DEFAULT       what the shortcut starts
-#   ICON          the shortcut's and installer's icon, an .ico
+#   ICON          the shortcut's and installer's icon: an .ico, or a PNG of
+#                 at most 256x256, which goes into one as it is
 #   MANUFACTURER  who makes it (default: the repository's owner)
 #   SUMMARY       one line on what it is
 #   SMOKE         the installed app's smoke test: the arguments to start it
 #                 with (--self-test); it must exit 0
+#   SMOKE_STAYS_UP  for an app with no self-test, a smoke test of another
+#                 kind: started bare, it must still be running this many
+#                 seconds later, its nibs loaded
 #   THEME         its look (default: WinUXTheme, the native one)
 set -euo pipefail
 
 conf=${1:?usage: msi.sh <windows.conf> <out-dir>}
 out=${2:?usage: msi.sh <windows.conf> <out-dir>}
-NAME="" APPS="" DEFAULT="" ICON="" MANUFACTURER="" SUMMARY="" SMOKE="" THEME=""
+NAME="" APPS="" DEFAULT="" ICON="" MANUFACTURER="" SUMMARY="" SMOKE="" SMOKE_STAYS_UP="" THEME=""
 . "$conf"
 : "${NAME:?$conf names no NAME}" "${APPS:?$conf names no APPS}" "${DEFAULT:?$conf names no DEFAULT}"
 PREFIX=${PREFIX:?PREFIX, the GNUstep prefix, is not set}
@@ -85,7 +89,22 @@ fi
 
 if [ -n "$ICON" ]; then
   [ -f "$ICON" ] || { echo "::error::$conf names ICON $ICON, which is not there" >&2; exit 1; }
-  cp "$ICON" "$stage/metadata/icons/app.ico"
+  case "$ICON" in
+    *.png|*.PNG)
+      # An .ico of one image, the PNG itself (Windows Vista on): a width or
+      # height of 256 is written 0.
+      python3 - "$ICON" "$stage/metadata/icons/app.ico" <<'PY'
+import struct, sys
+png = open(sys.argv[1], 'rb').read()
+w, h = struct.unpack('>II', png[16:24])
+if png[:8] != b'\x89PNG\r\n\x1a\n' or w > 256 or h > 256:
+    sys.exit(f"{sys.argv[1]}: not a PNG of at most 256x256")
+open(sys.argv[2], 'wb').write(struct.pack('<HHH', 0, 1, 1)
+    + struct.pack('<BBBBHHII', w % 256, h % 256, 0, 0, 1, 32, len(png), 22) + png)
+PY
+      ;;
+    *) cp "$ICON" "$stage/metadata/icons/app.ico" ;;
+  esac
 fi
 
 # What it carries, under which licences.

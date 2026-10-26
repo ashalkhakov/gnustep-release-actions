@@ -1,21 +1,24 @@
 #!/bin/bash
-# What a failed Windows check ran, to run again under Wine on Linux: the
-# repository as it was built (its tests, and what they wrote), the GNUstep
-# stack (C:\GNUstep) and CLANG64's DLLs, with a script that runs one of its
-# programs. In an MSYS2 shell, from the repository's directory:
+# A Windows build to run elsewhere: the repository as it was built (its
+# tests, and what a check wrote), the GNUstep stack (C:\GNUstep) and
+# CLANG64's DLLs, with a script that runs one of its programs. In an MSYS2
+# shell, from the repository's directory:
 #
-#   wine-bundle.sh <out> <repository>   <out>/<repository>-windows-wine.tar.xz
+#   build-bundle.sh <out> <repository>   <out>/<repository>-windows-build.tar.xz
 #
-# On Linux (Wine 9 or later; a display, or xvfb-run, for what draws):
+# On Windows (tar xf it, or 7-Zip), from its directory:
 #
-#   tar xf <repository>-windows-wine.tar.xz && cd <repository>-windows-wine
+#   run.bat source\Tests\obj\SomeTest.exe [arguments]
+#
+# On Linux, under Wine 9 or later (a display, or xvfb-run, for what draws):
+#
 #   ./run-under-wine.sh source/Tests/obj/SomeTest.exe [arguments]
 #
 # Without the compiler's own DLLs (LLVM's, clang's), which nothing built
 # loads, and the repository's history.
 set -euo pipefail
 out=$1
-name=${2##*/}-windows-wine
+name=${2##*/}-windows-build
 work=$(mktemp -d)
 root=$work/$name
 mkdir -p "$root/drive_c/GNUstep" "$root/drive_c/clang64/bin" "$root/source"
@@ -25,6 +28,9 @@ find /clang64/bin -maxdepth 1 -name '*.dll' \
   ! -name 'libLLVM*' ! -name 'libclang*' ! -name 'liblldb*' ! -name 'libMLIR*' \
   -exec cp {} "$root/drive_c/clang64/bin/" \;
 tar -cf - --exclude=.git . | tar -C "$root/source" -xf -
+# Fontconfig's configuration (cairo finds fonts through it), as the
+# installer carries it.
+mkdir -p "$root/drive_c/clang64/etc" && cp -a /clang64/etc/fonts "$root/drive_c/clang64/etc/"
 
 cat > "$root/run-under-wine.sh" <<'EOF'
 #!/bin/sh
@@ -46,6 +52,20 @@ export WINEPATH="${own}C:\\GNUstep\\bin;C:\\GNUstep\\Local\\Tools;C:\\GNUstep\\S
 exec wine "$@"
 EOF
 chmod +x "$root/run-under-wine.sh"
+
+# The same on Windows: the repository's DLL directories, then the stack's
+# and CLANG64's, from this directory.
+{
+  echo '@echo off'
+  echo 'rem Runs one of the repository'"'"'s programs with the DLLs it was built on.'
+  echo 'set "H=%~dp0"'
+  printf 'set "PATH='
+  (cd "$root" && find source -name '*.dll' -exec dirname {} \; | sort -u | sed 's|/|\\|g; s|^|%H%|' | tr '\n' ';')
+  echo '%H%drive_c\GNUstep\bin;%H%drive_c\GNUstep\Local\Tools;%H%drive_c\GNUstep\System\Tools;%H%drive_c\GNUstep\Local\Library\Libraries;%H%drive_c\GNUstep\System\Library\Libraries;%H%drive_c\clang64\bin;%PATH%"'
+  echo 'set "FONTCONFIG_PATH=%H%drive_c\clang64\etc\fonts"'
+  echo 'set "FONTCONFIG_FILE=%H%drive_c\clang64\etc\fonts\fonts.conf"'
+  echo '%*'
+} | sed 's/$/\r/' > "$root/run.bat"
 
 mkdir -p "$out"
 tar -C "$work" -cJf "$out/$name.tar.xz" "$name"
