@@ -42,10 +42,6 @@ on:
         description: The repository's own build dependencies (MSYS2 packages, as in the stack's packages-msys2.txt), beyond what the stack needs
         type: string
         default: ''
-      databases:
-        description: Database servers its tests use (postgres mysql mariadb), started for make check; see scripts/databases-windows.ps1
-        type: string
-        default: ''
       wine:
         description: What was built, kept before it is checked, to run under Wine on Linux (scripts/wine-bundle.sh); for a check that takes the runner down with it
         type: boolean
@@ -130,15 +126,6 @@ jobs:
           done
           "$PREFIX/share/gnustep-patches/build-gnustep.sh" --verify-only
           echo "GNUstep $(cat "$PREFIX/share/gnustep-patches/VERSION")"
-
-      # On the runner itself: its Docker runs Windows containers only.
-      - name: Databases
-        if: inputs.databases != ''
-        shell: pwsh
-        working-directory: ${{ github.workspace }}
-        env:
-          DATABASES: ${{ inputs.databases }}
-        run: '& "$env:GITHUB_WORKSPACE/.release-actions/scripts/databases-windows.ps1"'
 
       - name: make
         run: '"$GITHUB_WORKSPACE/.release-actions/scripts/gnustep-make.sh"'
