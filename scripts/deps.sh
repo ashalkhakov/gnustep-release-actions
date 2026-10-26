@@ -13,8 +13,9 @@
 #                   unpacked at C:\ (they hold GNUstep), the stack first; and
 #                   WinSparkle's include/ and x64 DLL in .deps/WinSparkle;
 #                   in an MSYS2 shell
-#   deps.sh apple   each one's <name>-<version>-apple.zip (its XCFrameworks, and
-#                   PlugIns/ when it ships loadable bundles), and
+#   deps.sh apple   each one's <name>-<version>-apple.zip (its XCFrameworks,
+#                   PlugIns/ when it ships loadable bundles, bin/ when it ships
+#                   tools for a build), and
 #                   Sparkle's, unpacked into .deps/ in the repository's root; a
 #                   release with no such zip has nothing for Apple (FreeCoreData:
 #                   Apple's Core Data is the system's) and is passed over
@@ -95,7 +96,7 @@ while read -r name version; do
       [ "$status" = 0 ] || exit 1
       mkdir -p .deps
       ditto -x -k "$work/$file" .deps/
-      echo "$repo $version: $(cd .deps && ls -d *.xcframework PlugIns/* 2>/dev/null | tr '\n' ' ')"
+      echo "$repo $version: $(cd .deps && ls -d *.xcframework PlugIns/* bin/* 2>/dev/null | tr '\n' ' ')"
       ;;
   esac
 done <<< "$entries"
