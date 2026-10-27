@@ -196,7 +196,9 @@ jobs:
           rm -rf "$stage"
           "$GITHUB_WORKSPACE/.release-actions/scripts/gnustep-make.sh" install DESTDIR="$stage"
           echo "STAGE=$stage" >> "$GITHUB_ENV"
-          (cd "$stage" && find . -type f | sed 's|^\./|  /|' | head -50)
+          # The first 50, read by sed to the end: head would leave find writing
+          # to a closed pipe (SIGPIPE, exit 141 under pipefail) past 50 files.
+          (cd "$stage" && find . -type f | sed -n '1,50s|^\./|  /|p')
 
       # What was installed, under GNUstep, as what builds on it unpacks it:
       # at C:\.

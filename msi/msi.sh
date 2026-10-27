@@ -80,6 +80,12 @@ cp "$tools/defaults.exe" "$stage/runtime/bin/"
 mkdir -p "$stage/runtime/etc"
 cp -a "${MINGW_PREFIX:-/clang64}/etc/fonts" "$stage/runtime/etc/"
 
+# The certificate authorities HTTPS is checked against, MSYS2's: libcurl
+# (gnustep-base's NSURLSession) reads them from ..\etc\ssl\certs beside its
+# own DLL, and without them no secure connection is made at all.
+mkdir -p "$stage/runtime/etc/ssl/certs"
+cp "${MINGW_PREFIX:-/clang64}/etc/ssl/certs/ca-bundle.crt" "$stage/runtime/etc/ssl/certs/"
+
 # WinSparkle, for an app that updates itself (deps.sh put it in .deps when
 # pins.env names WINSPARKLE_VERSION), and its licence.
 if [ -f .deps/WinSparkle/WinSparkle.dll ]; then
