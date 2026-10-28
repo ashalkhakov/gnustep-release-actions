@@ -147,7 +147,7 @@ jobs:
           [ -d "$STAGE/opt/gnustep" ] || { echo "::error::make install put nothing under /opt/gnustep"; exit 1; }
           name=$(basename "${{ inputs.repository || github.repository }}" | tr 'A-Z' 'a-z')
           mkdir -p "$GITHUB_WORKSPACE/out"
-          tar -C "$STAGE" -cJf "$GITHUB_WORKSPACE/out/$name-$APP_VERSION-ubuntu22.04-$(uname -m).tar.xz" opt
+          "$GITHUB_WORKSPACE/.release-actions/scripts/library-archive.sh" "$STAGE" opt "$GITHUB_WORKSPACE/out" "$name" "$APP_VERSION-ubuntu22.04-$(uname -m)"
           echo "ARTIFACT=$name-$APP_VERSION-ubuntu22.04-$(uname -m)" >> "$GITHUB_ENV"
 
       # An application's: its AppImage (x86_64), when it has an appimage.conf.

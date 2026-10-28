@@ -23,6 +23,13 @@
 #                   release with no such zip has nothing for Apple (FreeCoreData:
 #                   Apple's Core Data is the system's) and is passed over
 #
+# A library's optional parts (its .github/release/parts.conf, for
+# FreeCoreData its PostgreSQL and MySQL stores) come only when asked for:
+#
+#   FREECOREDATA_PARTS="postgresql mysql"
+#
+# each <name>-<part>-<version>-<platform>.tar.xz, unpacked beside the library.
+#
 # <NAME> is the repository's name in capitals, '-' as '_'. Run from the
 # repository's root; a repository with no pins.env builds on nothing of ours.
 set -euo pipefail
@@ -51,6 +58,22 @@ fetch() {  # fetch <url> <file>; 2 when the release has no such file
 
 work=$(mktemp -d)
 arch=$(uname -m)
+
+# The archive <file> of <repo>'s v<version>, unpacked where its platform's go.
+unpack() {  # unpack linux|windows <repo> <version> <file>
+  fetch "https://github.com/ashalkhakov/$2/releases/download/v$3/$4" "$work/$4" \
+    || { echo "::error::no $4 in $2's v$3 release"; exit 1; }
+  if [ "$1" = linux ]; then
+    sudo mkdir -p /opt/gnustep && sudo chown "$(id -u):$(id -g)" /opt/gnustep
+    # Into directories already there (/opt is root's) without setting
+    # their times and modes, which only their owner may.
+    tar -C / --no-overwrite-dir -xJf "$work/$4"
+    echo "$4: $(tar -tJf "$work/$4" | wc -l) files into /opt/gnustep"
+  else
+    tar -C /c -xJf "$work/$4"
+    echo "$4: $(tar -tJf "$work/$4" | wc -l) files into C:\\GNUstep"
+  fi
+}
 while read -r name version; do
   [ -n "$name" ] || continue
   repo=$(echo "$name" | tr 'A-Z_' 'a-z-')
@@ -78,22 +101,16 @@ while read -r name version; do
       cp -R "$work/sparkle/Sparkle.xcframework" .deps/
       echo "Sparkle $version: .deps/Sparkle.xcframework"
       ;;
-    linux:*)
-      file=$repo-$version-ubuntu22.04-$arch.tar.xz
-      fetch "https://github.com/ashalkhakov/$repo/releases/download/v$version/$file" "$work/$file" \
-        || { echo "::error::no $file in $repo's v$version release"; exit 1; }
-      sudo mkdir -p /opt/gnustep && sudo chown "$(id -u):$(id -g)" /opt/gnustep
-      # Into directories already there (/opt is root's) without setting
-      # their times and modes, which only their owner may.
-      tar -C / --no-overwrite-dir -xJf "$work/$file"
-      echo "$repo $version: $(tar -tJf "$work/$file" | wc -l) files into /opt/gnustep"
-      ;;
-    windows:*)
-      file=$repo-$version-windows-clang64-x86_64.tar.xz
-      fetch "https://github.com/ashalkhakov/$repo/releases/download/v$version/$file" "$work/$file" \
-        || { echo "::error::no $file in $repo's v$version release"; exit 1; }
-      tar -C /c -xJf "$work/$file"
-      echo "$repo $version: $(tar -tJf "$work/$file" | wc -l) files into C:\\GNUstep"
+    linux:*|windows:*)
+      case "$platform" in
+        linux) suffix=$version-ubuntu22.04-$arch ;;
+        windows) suffix=$version-windows-clang64-x86_64 ;;
+      esac
+      unpack "$platform" "$repo" "$version" "$repo-$suffix.tar.xz"
+      parts=$(sed -n "s/^${name}_PARTS=[\"']\{0,1\}\([^\"']*\)[\"']\{0,1\}\$/\1/p" "$pins")
+      for part in $parts; do
+        unpack "$platform" "$repo" "$version" "$repo-$part-$suffix.tar.xz"
+      done
       ;;
     apple:*)
       file=$repo-$version-apple.zip

@@ -212,7 +212,7 @@ jobs:
           name=$(basename "${{ inputs.repository || github.repository }}" | tr 'A-Z' 'a-z')
           out=$(cygpath -u "$GITHUB_WORKSPACE")/out
           mkdir -p "$out"
-          tar -C "$STAGE/c" -cJf "$out/$name-$APP_VERSION-windows-clang64-x86_64.tar.xz" GNUstep
+          "$GITHUB_WORKSPACE/.release-actions/scripts/library-archive.sh" "$STAGE/c" GNUstep "$out" "$name" "$APP_VERSION-windows-clang64-x86_64"
           echo "ARTIFACT=$name-$APP_VERSION-windows-clang64-x86_64" >> "$GITHUB_ENV"
 
       # An application's: its installer, when it has a windows.conf.

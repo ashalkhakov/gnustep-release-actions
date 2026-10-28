@@ -62,6 +62,17 @@ projects find them. On your own machine, the same script does the same
 (`scripts/deps.sh linux` or `apple`, from the repository's root). A library
 publishes exactly those files for each of its releases.
 
+A library's optional parts, which most apps need not carry, are archives of
+their own: FreeCoreData's PostgreSQL and MySQL stores link their databases'
+client libraries, and only a server wants them. The library names them in
+`.github/release/parts.conf` ([`scripts/library-archive.sh`](scripts/library-archive.sh)),
+and an app asks for the ones it uses:
+
+```sh
+FREECOREDATA_VERSION=0.11.0
+FREECOREDATA_PARTS="postgresql mysql"  # freecoredata-postgresql-<version>-..., and mysql's
+```
+
 ### `.github/workflows/build.yml`: names only
 
 ```yaml
