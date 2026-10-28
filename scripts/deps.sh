@@ -5,7 +5,10 @@
 #   GNUSTEP_PATCHES_VERSION=2026.10.13   ashalkhakov/gnustep-patches, tag v2026.10.13
 #   FREECOREDATA_VERSION=0.5.0           ashalkhakov/freecoredata, tag v0.5.0
 #   SPARKLE_VERSION=2.10.0               sparkle-project/Sparkle, tag 2.10.0 (Apple)
-#   WINSPARKLE_VERSION=0.9.4             vslavik/winsparkle, tag v0.9.4 (Windows)
+#   WINSPARKLE_VERSION=0.9.4             vslavik/winsparkle, tag v0.9.4 (Windows;
+#                                        fetched at 0.9.4 when not named: the
+#                                        stack's GSUpdater loads it, so every
+#                                        installer carries it)
 #
 #   deps.sh linux   each one's <name>-<version>-ubuntu22.04-<arch>.tar.xz, unpacked
 #                   at / (they hold opt/gnustep), the stack first
@@ -31,6 +34,9 @@ pins=.github/pins.env
 entries=$(sed -n 's/^\([A-Z0-9_]*\)_VERSION=\(.*\)$/\1 \2/p' "$pins" \
           | awk '$1 == "GNUSTEP_PATCHES" { print; next } { rest = rest $0 "\n" } END { printf "%s", rest }')
 [ -n "$entries" ] || { echo "$pins names no *_VERSION: nothing to fetch"; exit 0; }
+if [ "$platform" = windows ] && ! echo "$entries" | grep -q '^WINSPARKLE '; then
+  entries=$(printf '%s\nWINSPARKLE 0.9.4' "$entries")
+fi
 
 fetch() {  # fetch <url> <file>; 2 when the release has no such file
   local status
