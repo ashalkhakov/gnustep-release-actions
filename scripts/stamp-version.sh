@@ -21,7 +21,9 @@
 #                     CFBundleVersion = build, ApplicationRelease and
 #                     FullVersionID = display; only the keys it has, and not
 #                     a $(VARIABLE), which Xcode fills from the project
-#   an old-style one  ApplicationRelease = display, and FullVersionID beside it
+#   an old-style one  ApplicationRelease = display, and FullVersionID beside it;
+#                     CFBundleVersion = build where it has one (WinSparkle's
+#                     version, which it compares with the Windows appcast's)
 #   an app's GNUmakefile (one with APP_NAME)   VERSION = display; a library's
 #                     VERSION is its soname's, and is left alone
 #
@@ -66,6 +68,7 @@ for path in sys.stdin.read().split("\0"):
             text, _ = sub(text, r"(<key>%s</key>\s*<string>)([^<]*)(</string>)" % key, value)
     elif path.endswith(".plist") and re.search(r"^\s*ApplicationRelease\s*=", text, re.M):
         text, _ = sub(text, r"(?m)(^\s*ApplicationRelease\s*=\s*\")([^\"]*)(\";)", display)
+        text, _ = sub(text, r"(?m)(^\s*CFBundleVersion\s*=\s*\")([^\"]*)(\";)", build)
         if re.search(r"^\s*FullVersionID\s*=", text, re.M):
             text, _ = sub(text, r"(?m)(^\s*FullVersionID\s*=\s*\")([^\"]*)(\";)", display)
         else:
