@@ -11,6 +11,9 @@
 #   PREFIX        the GNUstep prefix, /c/GNUstep (the stack and pins.env's)
 #   STAGE         make install's staging directory (it holds c/GNUstep)
 #   APP_VERSION   the version (version.sh's)
+#   BUILD_NUMBER  the build (version.sh's), which the updater compares
+#   SPARKLE_PRIVATE_KEY  the Mac's Sparkle key (generate_keys -x), whose
+#                 public half the installed app checks its feed with
 #
 # The prefix is staged as the installed app's runtime with its layout kept:
 # gnustep-base reads its GNUstep.conf from beside its DLL, every path in it
@@ -86,12 +89,72 @@ cp -a "${MINGW_PREFIX:-/clang64}/etc/fonts" "$stage/runtime/etc/"
 mkdir -p "$stage/runtime/etc/ssl/certs"
 cp "${MINGW_PREFIX:-/clang64}/etc/ssl/certs/ca-bundle.crt" "$stage/runtime/etc/ssl/certs/"
 
-# WinSparkle, for an app that updates itself (deps.sh put it in .deps when
-# pins.env names WINSPARKLE_VERSION), and its licence.
+# WinSparkle, which the stack's GSUpdater loads (deps.sh put it in .deps),
+# and its licence.
 if [ -f .deps/WinSparkle/WinSparkle.dll ]; then
   cp .deps/WinSparkle/WinSparkle.dll "$stage/runtime/bin/"
   cp .deps/WinSparkle/COPYING "$stage/metadata/licenses/WinSparkle.txt"
 fi
+
+# What GSUpdater reads from each app's Info-gnustep.plist, so that no app
+# keeps it: the build (CFBundleVersion, which the feed's sparkle:version is
+# compared with) and, with the Sparkle key, the feed (the latest release's
+# appcast-windows.xml, which windows.yml writes) and the key's public half.
+# An app's own SUWindowsFeedURL or SUPublicEDKey is kept. Without the key
+# there is no feed, and GSUpdater gives no updates.
+for app in $APPS; do
+  plist="$stage/app/$app.app/Resources/Info-gnustep.plist"
+  [ -f "$plist" ] || continue
+  FEED="https://github.com/$repository/releases/latest/download/appcast-windows.xml" \
+    python3 - "$(dirname "$0")" "$plist" <<'PY'
+import base64, os, re, sys
+sys.path.insert(0, sys.argv[1])
+from appcast import public_key, seed_of
+
+path = sys.argv[2]
+text = open(path, encoding="utf-8").read()
+xml = "<plist" in text
+
+def has(key):
+    return re.search((r"<key>%s</key>" if xml else r"(?<![\w.])\"?%s\"?\s*=") % key, text)
+
+def put(key, value):
+    global text
+    if xml:
+        entry = "<key>%s</key>\n\t<string>%s</string>" % (key, value)
+        found = re.search(r"<key>%s</key>\s*<[^>]*>[^<]*</[^>]*>" % key, text)
+        if found:
+            text = text[:found.start()] + entry + text[found.end():]
+        else:
+            at = text.rindex("</dict>")
+            text = text[:at] + "\t" + entry + "\n" + text[at:]
+    else:
+        entry = '%s = "%s";' % (key, value)
+        found = re.search(r"(?<![\w.])\"?%s\"?\s*=\s*(\"[^\"]*\"|[^;]*);" % key, text)
+        if found:
+            text = text[:found.start()] + entry + text[found.end():]
+        else:
+            at = text.rindex("}")
+            text = text[:at].rstrip() + "\n  " + entry + "\n" + text[at:]
+
+said = []
+put("CFBundleVersion", os.environ.get("BUILD_NUMBER") or "0")
+said.append("build %s" % (os.environ.get("BUILD_NUMBER") or "0"))
+key = os.environ.get("SPARKLE_PRIVATE_KEY", "")
+if key:
+    if not has("SUWindowsFeedURL"):
+        put("SUWindowsFeedURL", os.environ["FEED"])
+    if not has("SUPublicEDKey"):
+        put("SUPublicEDKey", base64.b64encode(public_key(seed_of(key))).decode())
+    said.append("its updates from %s" % re.search(
+        (r"<key>SUWindowsFeedURL</key>\s*<string>([^<]*)" if xml
+         else r"SUWindowsFeedURL\"?\s*=\s*\"?([^\";]*)"), text).group(1))
+else:
+    said.append("no updates (no SPARKLE_PRIVATE_KEY)")
+open(path, "w", encoding="utf-8").write(text)
+print("%s: %s" % (path, ", ".join(said)))
+PY
+done
 
 if [ -n "$ICON" ]; then
   [ -f "$ICON" ] || { echo "::error::$conf names ICON $ICON, which is not there" >&2; exit 1; }
@@ -207,9 +270,9 @@ manifest = {
     "installDirectoryName": name,
     "launcherFileName": name + ".exe",
     "runtimeSearchRoots": [r"$msys_bin"],
-    # Part of every Windows (LDAP, which libcurl links), missing from the
-    # packager's list of system DLLs.
-    "ignoredRuntimeDependencies": ["WLDAP32.dll"],
+    # Part of every Windows, missing from the packager's list of system
+    # DLLs: LDAP, which libcurl links; WinINet, WinSparkle's.
+    "ignoredRuntimeDependencies": ["WLDAP32.dll", "WININET.dll"],
   }},
 }
 if "$ICON":

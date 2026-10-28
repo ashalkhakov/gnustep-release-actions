@@ -60,6 +60,9 @@ jobs:
     name: Windows (x86_64)
     runs-on: windows-2025
     timeout-minutes: 120
+    # The Sparkle key lives in this environment, as for the Mac: its public
+    # half goes into each app for its updater, and it signs the appcast.
+    environment: production
     env:
       TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
       CC: clang
@@ -209,7 +212,7 @@ jobs:
           name=$(basename "${{ inputs.repository || github.repository }}" | tr 'A-Z' 'a-z')
           out=$(cygpath -u "$GITHUB_WORKSPACE")/out
           mkdir -p "$out"
-          tar -C "$STAGE/c" -cJf "$out/$name-$APP_VERSION-windows-clang64-x86_64.tar.xz" GNUstep
+          "$GITHUB_WORKSPACE/.release-actions/scripts/library-archive.sh" "$STAGE/c" GNUstep "$out" "$name" "$APP_VERSION-windows-clang64-x86_64"
           echo "ARTIFACT=$name-$APP_VERSION-windows-clang64-x86_64" >> "$GITHUB_ENV"
 
       # An application's: its installer, when it has a windows.conf.
@@ -226,6 +229,9 @@ jobs:
         id: msi
         if: steps.name.outputs.name
         uses: ./.release-actions/msi
+        env:
+          # The public half goes into each app's plist, for its updater.
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         with:
           working-directory: ${{ github.workspace }}/source/${{ inputs.directory }}
 

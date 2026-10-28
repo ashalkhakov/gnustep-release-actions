@@ -62,6 +62,17 @@ projects find them. On your own machine, the same script does the same
 (`scripts/deps.sh linux` or `apple`, from the repository's root). A library
 publishes exactly those files for each of its releases.
 
+A library's optional parts, which most apps need not carry, are archives of
+their own: FreeCoreData's PostgreSQL and MySQL stores link their databases'
+client libraries, and only a server wants them. The library names them in
+`.github/release/parts.conf` ([`scripts/library-archive.sh`](scripts/library-archive.sh)),
+and an app asks for the ones it uses:
+
+```sh
+FREECOREDATA_VERSION=0.11.0
+FREECOREDATA_PARTS="postgresql mysql"  # freecoredata-postgresql-<version>-..., and mysql's
+```
+
 ### `.github/workflows/build.yml`: names only
 
 ```yaml
@@ -95,6 +106,7 @@ jobs:
       library: true                          # a library: publish its archive
       extra-packages: sqlite3 postgresql     # MSYS2 CLANG64 packages, short names
       databases: postgres mysql mariadb      # the same variables as on Linux
+    secrets: inherit                         # the Sparkle key, for updates
   macos:
     uses: ashalkhakov/gnustep-release-actions/.github/workflows/macos.yml@v1
     with:
@@ -222,6 +234,16 @@ packages building on it needs. A fix to GNUstep reaches a repository when its
   and `SUPublicEDKey`. TopoText's `Examples/SimpleNotes/AppKit/SNUpdater.h`
   is the pattern: Sparkle on macOS, nothing on GNUstep, where the AppImage
   is updated from outside.
+- **Windows:** the stack's `GSUpdater` (`#import <GSUpdater/GSUpdater.h>`,
+  `-lGSUpdater`): `initStarting:YES` at launch, and a *Check for Updates…*
+  menu item sent `checkForUpdates:` and shown when `available`. It is
+  WinSparkle, which `deps.sh` fetches (0.9.4 unless `pins.env` names a
+  `WINSPARKLE_VERSION`) and the installer carries; the installer writes what
+  it reads into each app's `Info-gnustep.plist`: `CFBundleVersion` (the
+  build), `SUWindowsFeedURL` (the latest release's `appcast-windows.xml`,
+  which a tag's run writes and signs) and `SUPublicEDKey` (the Sparkle key's
+  public half). On Linux `GSUpdater` is never `available`. The caller passes
+  `secrets: inherit` to `windows.yml` as to `macos.yml`.
 - **Secrets**, in the repository's `production` environment, read by a
   tag's run only: `MACOS_CERTIFICATE`, `MACOS_CERTIFICATE_PASSWORD`,
   `MACOS_SIGN_IDENTITY` (optional), `NOTARY_APPLE_ID`, `NOTARY_TEAM_ID`,
