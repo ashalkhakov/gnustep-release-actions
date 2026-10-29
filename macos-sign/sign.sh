@@ -61,8 +61,8 @@ sign() {
 # inside out: Sparkle's helpers first, as its documentation has it for a
 # Developer ID app (the downloader keeps its entitlements); then every
 # framework embedded (what is there, not a list); then every plug-in, each
-# after the frameworks it embeds; then the app, whose signature seals
-# theirs. Not --deep, which Apple deprecates and which signs the helpers
+# after the frameworks it embeds; then every other executable it carries;
+# then the app, whose signature seals theirs. Not --deep, which Apple deprecates and which signs the helpers
 # without what they need.
 sparkle="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
 if [ -d "$sparkle" ]; then
@@ -82,6 +82,15 @@ for plugin in "$APP"/Contents/PlugIns/*; do
     sign "$fw"
   done
   sign "$plugin"
+done
+# The executables the app carries beside its own (Quarry's language server
+# and debug adapter, in Contents/MacOS) or in Contents/Helpers: notarization
+# checks each, and the app's signature seals but does not sign them.
+main=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Contents/Info.plist" 2>/dev/null || true)
+for exe in "$APP"/Contents/MacOS/* "$APP"/Contents/Helpers/*; do
+  [ -f "$exe" ] && [ -x "$exe" ] && [ "$(basename "$exe")" != "$main" ] || continue
+  file -b "$exe" | grep -q 'Mach-O' || continue
+  sign "$exe"
 done
 # The app keeps the entitlements its build gave it (a sandboxed app's
 # sandbox, Sparkle's mach-lookup names), which --force would otherwise drop;
