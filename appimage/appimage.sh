@@ -34,6 +34,11 @@
 #   METAINFO           the AppStream file software centres show
 #   LOADED             globs of what is loaded at run time rather than linked
 #                      (plug-ins, stores): their libraries are bundled too
+#   PREPARE            a script of the repository's, run from its root with
+#                      the AppDir's path once the apps are in it, for what no
+#                      scan finds: libraries opened by name (dlopen), their
+#                      plug-ins, their licences. What it puts under usr/lib
+#                      has its libraries bundled too
 #   REQUIRE            paths that must be in the image, as the end of a path
 #                      under it (SimpleNotes.app/Resources/MainMenu.xib)
 #   SMOKE              the image's smoke test (appimage-test, on a clean
@@ -46,7 +51,7 @@ set -euo pipefail
 conf=${1:?usage: appimage.sh <appimage.conf>}
 here=$(cd "$(dirname "$0")" && pwd)
 IMAGE="" NAME="" APPS="" TOOLS="" DEFAULT="" ROUTES="" WITH_ARGUMENTS="" WITH_FILE=""
-FIXED_PITCH_FONT="" ENTRIES="" METAINFO="" LOADED="" REQUIRE=""
+FIXED_PITCH_FONT="" ENTRIES="" METAINFO="" LOADED="" PREPARE="" REQUIRE=""
 . "$conf"
 : "${IMAGE:?$conf names no IMAGE}" "${NAME:?$conf names no NAME}" "${DEFAULT:?$conf names no DEFAULT}"
 [ -n "$ENTRIES" ] || { echo "$conf names no ENTRIES" >&2; exit 1; }
@@ -141,6 +146,10 @@ for tool in $TOOLS; do
   [ -n "$bin" ] || { echo "MISSING: the $tool tool" >&2; exit 1; }
   EXEC_ARGS+=(--executable "$bin")
 done
+if [ -n "$PREPARE" ]; then
+  [ -f "$PREPARE" ] || { echo "$conf names PREPARE $PREPARE, which is not there" >&2; exit 1; }
+  bash "$PREPARE" "$root/AppDir"
+fi
 for path in $REQUIRE; do
   found=$(find AppDir/usr -path "*/$path" 2>/dev/null | head -n 1)
   [ -n "$found" ] || { echo "MISSING: $path" >&2; exit 1; }
@@ -182,8 +191,9 @@ fi
 du -sh AppDir
 
 # What is loaded at run time rather than linked -- gnustep-gui's backend and
-# sound bundles, the app's own LOADED -- and the tools GNUstep starts (gpbs,
-# gdnc): their libraries too, not the files themselves, which are in place.
+# sound bundles, the app's own LOADED, what PREPARE put in usr/lib -- and the
+# tools GNUstep starts (gpbs, gdnc): their libraries too, not the files
+# themselves, which are in place.
 DEPS_ARGS=()
 while IFS= read -r elf; do
   DEPS_ARGS+=(--deploy-deps-only "$elf")
@@ -191,6 +201,7 @@ done < <( {
     find AppDir/usr/System/Library/Bundles AppDir/usr/Local/Library/Bundles \
          AppDir/usr/System/Tools AppDir/usr/Local/Tools -type f -perm -111 2>/dev/null
     for glob in $LOADED; do find AppDir/usr -name "$glob" -type f 2>/dev/null; done
+    [ -z "$PREPARE" ] || find AppDir/usr/lib -type f 2>/dev/null
   } | sort -u | xargs -r file | awk -F: '/ELF/{print $1}')
 
 export OUTPUT="$IMAGE-${APP_VERSION:-dev}-$arch.AppImage"
