@@ -9,7 +9,7 @@ is here, once, and a fix made here reaches every repository at once.
 
 | Action | What it does |
 |---|---|
-| [`macos-sign`](macos-sign/action.yml) | Signs an .app with the Developer ID identity in a .p12, inside out (Sparkle's helpers, embedded frameworks, the app), hardened runtime, timestamped |
+| [`macos-sign`](macos-sign/action.yml) | Signs an .app with the Developer ID identity in a .p12, inside out (Sparkle's helpers, embedded libraries and frameworks, the app), hardened runtime, timestamped |
 | [`macos-notarize`](macos-notarize/action.yml) | Notarizes it (Apple's log on rejection), staples the ticket with retries, Gatekeeper's check |
 | [`sparkle-appcast`](sparkle-appcast/action.yml) | A release's Sparkle appcast, signed with the EdDSA key |
 | [`appimage-update-info`](appimage-update-info/action.yml) | A release's AppImage update information, so the image updates itself from the newest release |
@@ -155,6 +155,10 @@ needed; `ICON` is an `.ico` or a PNG of at most 256x256. The installed app is
 smoke-tested with only Windows and its runtime on `PATH`: `SMOKE` starts it
 with arguments it must exit 0 from (a self-test), or, for an app with none,
 `SMOKE_STAYS_UP` the seconds it must still be running, its nibs loaded.
+`PREPARE` names a script of the repository's, run with the staging directory
+(`app/<App>.app`, `runtime/`) before it is packaged, for what no scan finds:
+DLLs an app loads by name, as `appimage.conf`'s `PREPARE` (below) is for the
+AppImage.
 
 `keep-build: true` uploads the build before `make check` (with
 `keep-build-make`, the checks' programs built first): a `.tar.xz` with the
@@ -180,7 +184,12 @@ ENTRIES="Scripts/appimage/simplenotes.desktop=Examples/SimpleNotes/Icons/SimpleN
 METAINFO=Scripts/appimage/io.github.ashalkhakov.SimpleNotes.appdata.xml
 LOADED="libCD*Store.so"                   # loaded at run time, not linked
 REQUIRE="SimpleNotes.momd"                # must be in the image
+PREPARE=scripts/appimage-extra.sh         # adds to AppDir what no scan finds
 ```
+
+`PREPARE` is given the AppDir once the apps are in it, for libraries an app
+opens by name (UDCode's database clients) and their licences; whatever it
+puts under `usr/lib` has its own libraries bundled, as `LOADED`'s do.
 
 [`appimage.sh`](appimage/appimage.sh) lists every name and what it does
 (`WITH_ARGUMENTS`, `WITH_FILE` and `FIXED_PITCH_FONT` too). The image's

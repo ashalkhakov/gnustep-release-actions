@@ -34,11 +34,17 @@
 #                 kind: started bare, it must still be running this many
 #                 seconds later, its nibs loaded
 #   THEME         its look (default: WinUXTheme, the native one)
+#   PREPARE       a script of the repository's, run from its root with the
+#                 staging directory's path (its app/<App>.app, runtime/,
+#                 metadata/) once the apps are in it, for what no scan finds:
+#                 DLLs loaded by name (LoadLibrary), their plug-ins, their
+#                 licences. What it adds to the runtime has its DLLs brought
+#                 by the packager; elsewhere, its own
 set -euo pipefail
 
 conf=${1:?usage: msi.sh <windows.conf> <out-dir>}
 out=${2:?usage: msi.sh <windows.conf> <out-dir>}
-NAME="" APPS="" DEFAULT="" ICON="" MANUFACTURER="" SUMMARY="" SMOKE="" SMOKE_STAYS_UP="" THEME=""
+NAME="" APPS="" DEFAULT="" ICON="" MANUFACTURER="" SUMMARY="" SMOKE="" SMOKE_STAYS_UP="" THEME="" PREPARE=""
 . "$conf"
 : "${NAME:?$conf names no NAME}" "${APPS:?$conf names no APPS}" "${DEFAULT:?$conf names no DEFAULT}"
 PREFIX=${PREFIX:?PREFIX, the GNUstep prefix, is not set}
@@ -67,6 +73,10 @@ for app in $APPS; do
   mv "$found" "$stage/app/"
 done
 [ -f "$stage/app/$DEFAULT.app/$DEFAULT.exe" ] || { echo "::error::no $DEFAULT.app/$DEFAULT.exe" >&2; exit 1; }
+if [ -n "$PREPARE" ]; then
+  [ -f "$PREPARE" ] || { echo "::error::$conf names PREPARE $PREPARE, which is not there" >&2; exit 1; }
+  bash "$PREPARE" "$stage"
+fi
 
 # The defaults tool, where the launcher seeds the app's first-run defaults
 # (the theme) with it.

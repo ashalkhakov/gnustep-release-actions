@@ -60,9 +60,10 @@ sign() {
 # --timestamp and --options runtime are what notarization requires. Signed
 # inside out: Sparkle's helpers first, as its documentation has it for a
 # Developer ID app (the downloader keeps its entitlements); then every
-# framework embedded (what is there, not a list); then every plug-in, each
-# after the frameworks it embeds; then every other executable it carries;
-# then the app, whose signature seals theirs. Not --deep, which Apple deprecates and which signs the helpers
+# plain library and framework embedded (what is there, not a list); then
+# every plug-in, each after the libraries and frameworks it embeds; then
+# every other executable it carries; then the app, whose signature seals
+# theirs. Not --deep, which Apple deprecates and which signs the helpers
 # without what they need.
 sparkle="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
 if [ -d "$sparkle" ]; then
@@ -72,12 +73,25 @@ if [ -d "$sparkle" ]; then
   sign "$sparkle/Updater.app"
 fi
 shopt -s nullglob
+# The plain libraries a Frameworks folder holds beside its frameworks
+# (UDCode's database clients, with their own plug-ins in a folder of their
+# own), each signed: the app's seal needs them signed, notarization by
+# Developer ID, and the hardened runtime loads them only then.
+sign_libraries() {
+  [ -d "$1" ] || return 0
+  find "$1" -type f ! -path '*.framework/*' -print0 | while IFS= read -r -d '' file; do
+    file -b "$file" | grep -q 'Mach-O' || continue
+    sign "$file"
+  done
+}
+sign_libraries "$APP/Contents/Frameworks"
 for fw in "$APP"/Contents/Frameworks/*.framework; do
   sign "$fw"
 done
 # Loadable bundles (UDCode's grammars): notarization checks each, and a
 # plug-in's code is not the app's to seal.
 for plugin in "$APP"/Contents/PlugIns/*; do
+  sign_libraries "$plugin/Contents/Frameworks"
   for fw in "$plugin"/Contents/Frameworks/*.framework; do
     sign "$fw"
   done
