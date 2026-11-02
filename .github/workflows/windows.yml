@@ -215,6 +215,15 @@ jobs:
           "$GITHUB_WORKSPACE/.release-actions/scripts/library-archive.sh" "$STAGE/c" GNUstep "$out" "$name" "$APP_VERSION-windows-clang64-x86_64"
           echo "ARTIFACT=$name-$APP_VERSION-windows-clang64-x86_64" >> "$GITHUB_ENV"
 
+      # A UDCode extension's packages (.udcx), when it has a udcode.conf.
+      - name: UDCode extension
+        run: |
+          "$GITHUB_WORKSPACE/.release-actions/scripts/udcode-extension.sh" "$APP_VERSION" "$(cygpath -u "$GITHUB_WORKSPACE")/out"
+          name=$(basename "${{ inputs.repository || github.repository }}" | tr 'A-Z' 'a-z')
+          if [ -f .github/release/udcode.conf ] && [ -z "${ARTIFACT:-}" ]; then
+            echo "ARTIFACT=$name-$APP_VERSION-udcode-win64" >> "$GITHUB_ENV"
+          fi
+
       # An application's: its installer, when it has a windows.conf.
       - name: The installer's name
         id: name
