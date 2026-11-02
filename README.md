@@ -197,6 +197,28 @@ launcher gives every app the Eau theme, the fonts it carries (with a
 fontconfig written at launch), the opener for URLs, Ctrl as Command, and
 `APPIMAGE_GDB=1` to run under gdb.
 
+## A UDCode extension: `.github/release/udcode.conf`
+
+A library that brings UDCode a mode of its own (ORMKit's ORM2, say) ships it
+as UDCode's extension packages: `.udcx` files, laid out as VS Code's `.vsix`
+(UDCode's [docs/extensions.md](https://github.com/ashalkhakov/UDCodeKit/blob/master/docs/extensions.md)),
+one per platform, attached to its release beside its archives:
+
+```sh
+PACKAGE=Scripts/udcx.sh   # run as Scripts/udcx.sh <version> <out> from the root, after make install
+```
+
+The repository's own script lays its package out: the bundle, the
+libraries it carries that UDCode has not, the licences, its
+`extension.vsixmanifest`'s `TargetPlatform`. Each workflow runs it after
+`make install` ([`scripts/udcode-extension.sh`](scripts/udcode-extension.sh)):
+on Linux and Windows with GNUstep's environment, as `make` has it; on a Mac
+with `CODESIGN_IDENTITY`, the identity the apps were signed with, on a
+signed release (UDCode loads only its own team's code), each package then
+notarized. It builds against UDCode's SDK, the `udcodekit` archives of the
+release `.github/pins.env` names (`UDCODEKIT_VERSION`), on the GNUstep stack
+that UDCode release builds on.
+
 ## Docker images
 
 A repository that publishes images (SimpleNotes' server, ODataKit's SDK and
