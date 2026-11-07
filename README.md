@@ -219,6 +219,19 @@ notarized. It builds against UDCode's SDK, the `udcodekit` archives of the
 release `.github/pins.env` names (`UDCODEKIT_VERSION`), on the GNUstep stack
 that UDCode release builds on.
 
+Beside each package goes the feed UDCode updates the extension from,
+`<id>-<platform>.json` (`<id>` its package.json's `publisher.name`): this
+release's version for that platform, its `engines.udcode`, and the package's
+URL in this release and its SHA-256. The extension names its feed in its
+package.json, with `{platform}` for UDCode to fill in:
+
+```json
+"updates": "https://github.com/ashalkhakov/UDQuakeTools/releases/latest/download/ashalkhakov.udquaketools-{platform}.json"
+```
+
+A package's name is `<name>-<version>-<platform>.udcx` (`<name>-<version>.udcx`
+for one that runs everywhere), which is where the feed's platform comes from.
+
 ## Docker images
 
 A repository that publishes images (SimpleNotes' server, ODataKit's SDK and
