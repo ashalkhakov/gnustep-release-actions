@@ -159,6 +159,32 @@ jobs:
             echo "ARTIFACT=$name-$APP_VERSION-udcode-$(uname -m)" >> "$GITHUB_ENV"
           fi
 
+      # UDCode with those packages in it, when udcode.conf names
+      # UDCODE_PACKAGE: UDCode's AppImage (x86_64) repacked, its update
+      # information this repository's on a release.
+      - name: The UDCode package's name
+        id: udcode
+        if: matrix.arch == 'x86_64'
+        run: |
+          [ -f .github/release/udcode.conf ] || exit 0
+          name=$(. .github/release/udcode.conf; echo "${UDCODE_PACKAGE:-}")
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: AppImage tools, for the UDCode package
+        if: steps.udcode.outputs.name
+        uses: ./.release-actions/appimage-tools
+
+      - name: Update information, for the UDCode package
+        if: steps.udcode.outputs.name
+        uses: ./.release-actions/appimage-update-info
+        with:
+          tag: ${{ env.TAG }}
+          zsync: ${{ steps.udcode.outputs.name }}-*x86_64.AppImage.zsync
+
+      - name: UDCode with the extension
+        if: steps.udcode.outputs.name
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/udcode-package.sh" "$APP_VERSION" "$GITHUB_WORKSPACE/out"'
+
       # An application's: its AppImage (x86_64), when it has an appimage.conf.
       - name: The image's name
         id: name

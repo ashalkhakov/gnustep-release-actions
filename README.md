@@ -232,6 +232,36 @@ package.json, with `{platform}` for UDCode to fill in:
 A package's name is `<name>-<version>-<platform>.udcx` (`<name>-<version>.udcx`
 for one that runs everywhere), which is where the feed's platform comes from.
 
+A repository with no app of its own (UDQuakeTools) has its packages signed
+all the same: on a Mac, the Sign step makes the identity ready with no app
+to sign.
+
+### UDCode with the extension in it
+
+For those who want the tools and not an editor to put them in, `udcode.conf`
+can name a package of UDCode that carries the extension:
+
+```sh
+UDCODE_PACKAGE=UDCode-UDQuakeTools   # the packages' name; the app in them is UDCode
+```
+
+Each workflow then takes UDCode's own release package for its platform (the
+release `UDCODEKIT_VERSION` names), puts this run's `.udcx` files in its
+`Resources/Extensions`, which UDCode installs the first time it starts, and
+attaches it to the release
+([`scripts/udcode-package.sh`](scripts/udcode-package.sh)):
+
+| Platform | From UDCode's | Made |
+|---|---|---|
+| macOS | `UDCode-macOS-<v>.zip` | `<name>-macOS-<version>.zip`: the app signed again (an addition breaks its seal) and notarized on a release; its package made universal, as the bundle is, so either Mac loads it |
+| Linux x86_64 | `UDCode-<v>-x86_64.AppImage` | `<name>-<version>-x86_64.AppImage`, repacked by linuxdeploy, with this repository's update information (and `.zsync`) on a release |
+| Windows x64 | `UDCode-<v>-win64-portable.zip` | `<name>-<version>-win64-portable.zip` |
+
+From then on the extension updates from its own feed and UDCode from its
+own (the AppImage from this repository's releases): an update of UDCode
+replaces the app, and the extension, installed in `~/.udcode/extensions`,
+stays.
+
 ## Docker images
 
 A repository that publishes images (SimpleNotes' server, ODataKit's SDK and

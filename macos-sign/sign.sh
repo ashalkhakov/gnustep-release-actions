@@ -3,10 +3,12 @@
 # release.yml, after ODataKit's and RDLKit's.
 #
 #   APP=...  CERTIFICATE=<base64 .p12>  CERTIFICATE_PASSWORD=...  [IDENTITY=...]
+#
+# With APP empty, the signing identity is made ready and nothing signed.
 set -euo pipefail
 
 if [ -z "${CERTIFICATE:-}" ]; then
-  echo "::warning::no certificate (MACOS_CERTIFICATE); shipping $(basename "$APP") unsigned"
+  echo "::warning::no certificate (MACOS_CERTIFICATE); shipping ${APP:+$(basename "$APP") }unsigned"
   echo "signed=false" >> "$GITHUB_OUTPUT"
   exit 0
 fi
@@ -52,6 +54,12 @@ if [ ! -e "$keychain" ]; then
   printf '%s\n' "$valid" | grep -F "\"$chosen\"" | head -1 | awk '{print $2}' > "$chosen_file"
 fi
 hash=$(cat "$chosen_file")
+# No app: the identity alone, for what is signed later (a UDCode extension's
+# packages, udcode-extension.sh; UDCode with them, udcode-package.sh).
+if [ -z "${APP:-}" ]; then
+  echo "signed=true" >> "$GITHUB_OUTPUT"
+  exit 0
+fi
 
 sign() {
   codesign --force --timestamp --options runtime --sign "$hash" "$@"
