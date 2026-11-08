@@ -148,6 +148,13 @@ jobs:
             APP="$RELEASE_DIR/${pair#*=}.app" GITHUB_OUTPUT="$out" "$GITHUB_WORKSPACE/.release-actions/macos-sign/sign.sh"
             grep -q '^signed=true' "$out" && signed=true
           done
+          # A UDCode extension with no app of its own: the identity its
+          # packages are signed with.
+          if [ -z "$APPS" ] && [ -f .github/release/udcode.conf ]; then
+            out=$(mktemp)
+            APP="" GITHUB_OUTPUT="$out" "$GITHUB_WORKSPACE/.release-actions/macos-sign/sign.sh"
+            grep -q '^signed=true' "$out" && signed=true
+          fi
           echo "signed=$signed" >> "$GITHUB_OUTPUT"
 
       - name: make installcheck, signed
@@ -176,6 +183,15 @@ jobs:
           NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
           NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
         run: '"$GITHUB_WORKSPACE/.release-actions/scripts/udcode-extension.sh" "$APP_VERSION" "$GITHUB_WORKSPACE/out"'
+
+      # UDCode with those packages in it, when udcode.conf names
+      # UDCODE_PACKAGE: signed again and notarized, on a release.
+      - name: UDCode with the extension
+        env:
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/udcode-package.sh" "$APP_VERSION" "$GITHUB_WORKSPACE/out"'
 
       - name: Package
         run: |

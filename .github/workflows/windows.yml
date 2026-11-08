@@ -104,7 +104,7 @@ jobs:
         with:
           msystem: CLANG64
           update: true
-          install: git make patch python tar xz unzip
+          install: git make patch python tar xz unzip zip
 
       - name: Version
         run: '"$GITHUB_WORKSPACE/.release-actions/scripts/version.sh"'
@@ -223,6 +223,11 @@ jobs:
           if [ -f .github/release/udcode.conf ] && [ -z "${ARTIFACT:-}" ]; then
             echo "ARTIFACT=$name-$APP_VERSION-udcode-win64" >> "$GITHUB_ENV"
           fi
+
+      # UDCode with those packages in it, when udcode.conf names
+      # UDCODE_PACKAGE: UDCode's portable zip with them inside.
+      - name: UDCode with the extension
+        run: '"$GITHUB_WORKSPACE/.release-actions/scripts/udcode-package.sh" "$APP_VERSION" "$(cygpath -u "$GITHUB_WORKSPACE")/out"'
 
       # An application's: its installer, when it has a windows.conf.
       - name: The installer's name
